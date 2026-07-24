@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video2Sprite Review</title>
+  <style>
+    :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; background: #0e1117; color: #edf2f7; }
+    main { max-width: 1180px; margin: auto; padding: 24px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    .muted { color: #9aa7b6; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin-top: 20px; }
+    .card { background: #171c24; border: 1px solid #2a3442; border-radius: 12px; padding: 16px; }
+    video, img { width: 100%; max-height: 480px; object-fit: contain; border-radius: 8px; background-color: #202735;
+      background-image: linear-gradient(45deg,#344052 25%,transparent 25%),linear-gradient(-45deg,#344052 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#344052 75%),linear-gradient(-45deg,transparent 75%,#344052 75%);
+      background-size: 24px 24px; background-position: 0 0,0 12px,12px -12px,-12px 0; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; color: #c8d3df; }
+    textarea { box-sizing: border-box; width: 100%; min-height: 90px; padding: 10px; border-radius: 8px; border: 1px solid #3a4657; background: #0e1117; color: #edf2f7; }
+    .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 14px 0; }
+    .scores label { color: #c8d3df; font-size: 13px; }
+    .scores input { box-sizing: border-box; width: 100%; margin-top: 5px; padding: 8px; border-radius: 7px; border: 1px solid #3a4657; background: #0e1117; color: #edf2f7; }
+    button { border: 0; border-radius: 8px; padding: 11px 18px; margin: 10px 8px 0 0; font-weight: 700; cursor: pointer; }
+    .approve { background: #35c98b; color: #07150f; }
+    .reject { background: #ff667d; color: #20070b; }
+    #status { margin-left: 8px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1 id="title">Video2Sprite Review</h1>
+  <div id="subtitle" class="muted"></div>
+  <section class="grid">
+    <article class="card"><h2>Raw source with sound</h2><video id="source" controls loop></video></article>
+    <article class="card"><h2>Processed transparent preview</h2><video id="preview" controls loop></video></article>
+    <article class="card"><h2>Atlas</h2><img id="atlas" alt="Sprite atlas"></article>
+    <article class="card"><h2>QC and provenance</h2><pre id="metrics"></pre></article>
+  </section>
+  <section class="card" style="margin-top:16px">
+    <h2>Decision</h2>
+    <div class="scores">
+      <label>Visual identity<input id="score-visual" type="number" min="1" max="5" step="1" value="3"></label>
+      <label>Motion quality<input id="score-motion" type="number" min="1" max="5" step="1" value="3"></label>
+      <label>Audio quality<input id="score-audio" type="number" min="1" max="5" step="1" value="3"></label>
+      <label>A/V sync<input id="score-sync" type="number" min="1" max="5" step="1" value="3"></label>
+      <label>Overall<input id="score-overall" type="number" min="1" max="5" step="1" value="3"></label>
+    </div>
+    <textarea id="note" placeholder="Describe identity, motion, transparency, audio, sync, or rejection issues."></textarea>
+    <div>
+      <button class="approve" data-decision="approved">Approve</button>
+      <button class="reject" data-decision="rejected">Reject</button>
+      <span id="status" class="muted"></span>
+    </div>
+  </section>
+</main>
+<script>
+let reviewData;
+async function load() {
+  reviewData = await fetch("review-data.json", {cache:"no-store"}).then(r => r.json());
+  document.querySelector("#title").textContent = `${reviewData.action_id} · ${reviewData.candidate_id}`;
+  document.querySelector("#subtitle").textContent = `${reviewData.provider} / ${reviewData.model_id} · QC ${reviewData.qc.status}`;
+  document.querySelector("#source").src = reviewData.paths.source;
+  document.querySelector("#preview").src = reviewData.paths.preview;
+  document.querySelector("#atlas").src = reviewData.paths.atlas;
+  document.querySelector("#metrics").textContent = JSON.stringify({qc: reviewData.qc, manifest: reviewData.manifest_summary}, null, 2);
+}
+async function decide(decision) {
+  const status = document.querySelector("#status");
+  status.textContent = "Saving…";
+  const response = await fetch("/api/decision", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      action_id: reviewData.action_id,
+      candidate_id: reviewData.candidate_id,
+      decision,
+      note: document.querySelector("#note").value,
+      scores: {
+        visual: Number(document.querySelector("#score-visual").value),
+        motion: Number(document.querySelector("#score-motion").value),
+        audio: Number(document.querySelector("#score-audio").value),
+        sync: Number(document.querySelector("#score-sync").value),
+        overall: Number(document.querySelector("#score-overall").value)
+      }
+    })
+  });
+  const body = await response.json();
+  status.textContent = response.ok ? `Saved: ${body.decision}` : `Error: ${body.error || response.status}`;
+}
+document.querySelectorAll("button[data-decision]").forEach(button => button.addEventListener("click", () => decide(button.dataset.decision)));
+load().catch(error => { document.querySelector("#status").textContent = error.message; });
+</script>
+</body>
+</html>

@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Video2Sprite 批量审核</title>
+  <style>
+    :root { color-scheme: dark; font: 15px/1.45 system-ui, sans-serif; background: #0b1020; color: #e8edf7; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { position: sticky; top: 0; z-index: 2; display: flex; gap: 12px; align-items: center; padding: 12px 18px; background: #11182b; border-bottom: 1px solid #2a3652; }
+    button, textarea, input { font: inherit; }
+    button { border: 1px solid #435270; border-radius: 8px; padding: 8px 13px; color: #eef3ff; background: #202b44; cursor: pointer; }
+    button:hover { background: #2a3858; }
+    button.approve { background: #176b48; }
+    button.reject { background: #7f2934; }
+    button:disabled { opacity: .45; cursor: default; }
+    #counter { min-width: 150px; font-variant-numeric: tabular-nums; }
+    main { max-width: 1500px; margin: auto; padding: 18px; }
+    .title { display: flex; gap: 12px; align-items: baseline; margin-bottom: 12px; }
+    .badge { border-radius: 999px; padding: 3px 9px; background: #33415f; }
+    .pass { background: #176b48; } .review { background: #7b5a16; } .fail { background: #7f2934; }
+    .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 520px); gap: 16px; }
+    .panel { padding: 14px; border: 1px solid #2a3652; border-radius: 12px; background: #11182b; }
+    .media { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    video, img { display: block; width: 100%; max-height: 480px; object-fit: contain; border-radius: 8px; background: #070b14; }
+    audio { width: 100%; margin-top: 10px; }
+    h1, h2, p { margin: 0 0 10px; }
+    h1 { font-size: 20px; } h2 { font-size: 16px; }
+    ul { margin: 8px 0; padding-left: 20px; }
+    .scores { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin: 12px 0; }
+    label { display: grid; gap: 4px; color: #b9c4d8; }
+    input, textarea { width: 100%; color: #eef3ff; background: #0b1020; border: 1px solid #435270; border-radius: 7px; padding: 7px; }
+    textarea { min-height: 90px; resize: vertical; }
+    .actions { display: flex; gap: 10px; margin-top: 12px; }
+    #message { min-height: 22px; margin-top: 10px; color: #ffd27b; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; color: #b9c4d8; }
+    @media (max-width: 900px) { .grid, .media { grid-template-columns: 1fr; } .scores { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <header>
+    <button id="prev">← 上一个</button>
+    <button id="next">下一个 →</button>
+    <button id="pending">下一个未审核</button>
+    <span id="counter">加载中…</span>
+  </header>
+  <main>
+    <div class="title">
+      <h1 id="title">批量审核</h1>
+      <span id="qcBadge" class="badge"></span>
+      <span id="decisionBadge" class="badge"></span>
+    </div>
+    <div class="grid">
+      <section class="panel">
+        <div class="media">
+          <div><h2>精灵预览</h2><video id="preview" controls loop></video></div>
+          <div><h2>原始生成视频</h2><video id="source" controls></video></div>
+        </div>
+        <h2 style="margin-top:14px">图集</h2>
+        <img id="atlas" alt="sprite atlas">
+        <audio id="audio" controls></audio>
+      </section>
+      <aside class="panel">
+        <h2>机器检查</h2>
+        <ul id="issues"></ul>
+        <pre id="summary"></pre>
+        <h2>人工评分（1–5）</h2>
+        <div class="scores" id="scores"></div>
+        <label>备注<textarea id="note" placeholder="只记录需要保留的判断依据"></textarea></label>
+        <div class="actions">
+          <button class="approve" id="approve">通过并下一个</button>
+          <button class="reject" id="reject">拒绝并下一个</button>
+        </div>
+        <div id="message"></div>
+      </aside>
+    </div>
+  </main>
+  <script>
+    const scoreNames = ["visual", "motion", "audio", "sync", "overall"];
+    const state = { entries: [], index: 0 };
+    const byId = id => document.getElementById(id);
+    const safePath = value => value ? encodeURI(value) : "";
+    for (const name of scoreNames) {
+      const label = document.createElement("label");
+      label.textContent = name;
+      const input = document.createElement("input");
+      input.type = "number"; input.min = "1"; input.max = "5"; input.step = "0.5"; input.value = "4";
+      input.dataset.score = name;
+      label.appendChild(input); byId("scores").appendChild(label);
+    }
+    function setMedia(id, path) {
+      const element = byId(id);
+      element.pause?.();
+      element.removeAttribute("src");
+      if (path) element.src = safePath(path);
+      element.hidden = !path;
+      element.load?.();
+    }
+    function render() {
+      const entry = state.entries[state.index];
+      if (!entry) return;
+      const reviewed = state.entries.filter(item => item.approval).length;
+      byId("counter").textContent = `${state.index + 1}/${state.entries.length} · 已审核 ${reviewed}/${state.entries.length}`;
+      byId("title").textContent = `${entry.action_id} / ${entry.candidate_id} · ${entry.model_id || "local"}`;
+      const qcStatus = entry.qc?.status || "missing";
+      byId("qcBadge").textContent = `QC ${qcStatus}`;
+      byId("qcBadge").className = `badge ${qcStatus}`;
+      byId("decisionBadge").textContent = entry.approval?.decision || "未审核";
+      setMedia("preview", entry.paths?.preview);
+      setMedia("source", entry.paths?.source);
+      setMedia("audio", entry.paths?.audio);
+      byId("atlas").src = safePath(entry.paths?.atlas);
+      const issues = byId("issues"); issues.replaceChildren();
+      for (const issue of entry.qc?.issues || []) {
+        const li = document.createElement("li");
+        li.textContent = `[${issue.severity}] ${issue.code}: ${issue.message}`;
+        issues.appendChild(li);
+      }
+      if (!issues.children.length) issues.innerHTML = "<li>无机器告警</li>";
+      const summary = entry.manifest_summary || {};
+      byId("summary").textContent = `帧数 ${summary.frame_count ?? "?"} · ${summary.duration_seconds ?? "?"}s · ${summary.fps ?? "?"} fps`;
+      byId("prev").disabled = state.index === 0;
+      byId("next").disabled = state.index === state.entries.length - 1;
+      byId("approve").disabled = qcStatus === "fail";
+      byId("message").textContent = "";
+    }
+    function move(delta) {
+      state.index = Math.max(0, Math.min(state.entries.length - 1, state.index + delta));
+      render();
+    }
+    function nextPending() {
+      const total = state.entries.length;
+      for (let offset = 1; offset <= total; offset++) {
+        const candidate = (state.index + offset) % total;
+        if (!state.entries[candidate].approval) { state.index = candidate; render(); return; }
+      }
+      byId("message").textContent = "所有候选都已审核。";
+    }
+    async function decide(decision) {
+      const entry = state.entries[state.index];
+      const scores = {};
+      for (const input of document.querySelectorAll("[data-score]")) scores[input.dataset.score] = Number(input.value);
+      byId("message").textContent = "正在保存…";
+      const response = await fetch("/api/decision", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({action_id: entry.action_id, candidate_id: entry.candidate_id, decision, note: byId("note").value, scores})
+      });
+      const result = await response.json();
+      if (!response.ok) { byId("message").textContent = result.error || "保存失败"; return; }
+      entry.approval = {decision: result.decision, reviewed_at: result.reviewed_at};
+      byId("note").value = "";
+      nextPending();
+    }
+    byId("prev").onclick = () => move(-1);
+    byId("next").onclick = () => move(1);
+    byId("pending").onclick = nextPending;
+    byId("approve").onclick = () => decide("approved");
+    byId("reject").onclick = () => decide("rejected");
+    fetch("review-queue.json", {cache: "no-store"}).then(response => response.json()).then(queue => {
+      state.entries = queue.entries || [];
+      if (!state.entries.length) throw new Error("没有可审核候选");
+      state.index = Math.max(0, state.entries.findIndex(entry => !entry.approval));
+      render();
+    }).catch(error => { byId("counter").textContent = error.message; });
+  </script>
+</body>
+</html>

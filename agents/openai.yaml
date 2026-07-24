@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sloth Video to Sprite"
+  short_description: "Turn action videos into synced sprite and sound packs"
+  default_prompt: "Use $sloth-codex-video2sprite-skill to batch-produce reviewed sprite atlases with synchronized sound while keeping media out of context and reusing deterministic processing caches."

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "last_reviewed": "2026-07-24",
+  "notes": "Aliases are conveniences only; account entitlement and current provider documentation are authoritative.",
+  "image": {
+    "default_provider": "openai",
+    "providers": {
+      "openai": {
+        "base_url": "https://api.openai.com/v1",
+        "default_model": "gpt-image-2",
+        "models": {
+          "gpt-image-2": {
+            "model_id": "gpt-image-2",
+            "supports_edit": true,
+            "supports_transparency": false
+          }
+        }
+      }
+    }
+  },
+  "video": {
+    "default_provider": "volcengine-ark",
+    "providers": {
+      "volcengine-ark": {
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "default_model": "seedance-2.0",
+        "models": {
+          "seedance-2.0": {
+            "model_id": "doubao-seedance-2-0-260128",
+            "native_audio": true,
+            "image_to_video": true,
+            "tier": "quality"
+          },
+          "seedance-2.0-fast": {
+            "model_id": "doubao-seedance-2-0-fast-260128",
+            "native_audio": true,
+            "image_to_video": true,
+            "tier": "speed"
+          },
+          "seedance-1.5-pro": {
+            "model_id": "doubao-seedance-1-5-pro-251215",
+            "native_audio": true,
+            "image_to_video": true,
+            "tier": "comparison"
+          },
+          "seedance-1.0-pro": {
+            "model_id": "doubao-seedance-1-0-pro-250528",
+            "native_audio": false,
+            "image_to_video": true,
+            "tier": "legacy"
+          }
+        }
+      }
+    }
+  }
+}
