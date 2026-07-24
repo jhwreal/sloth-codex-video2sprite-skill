@@ -16,6 +16,7 @@ from _v2s_common import (
     safe_json_text,
     sanitize,
 )
+from _v2s_media import _fixed_canvas_geometry
 
 
 class MediaFirewallTests(unittest.TestCase):
@@ -85,6 +86,9 @@ class ProcessingFingerprintTests(unittest.TestCase):
         run = {
             "master": {"sha256": "master"},
             "frame_size": {"width": 128, "height": 128},
+            "pivot": {"x": 64, "y": 112, "normalized": [0.5, 0.875]},
+            "placement": "fixed",
+            "resampling": "nearest",
         }
         action = {
             "prompt_sha256": "prompt",
@@ -112,8 +116,29 @@ class ProcessingFingerprintTests(unittest.TestCase):
             columns=None,
             profile="production",
         )
+        changed_pivot = candidate_processing_fingerprint(
+            {
+                **run,
+                "pivot": {"x": 64, "y": 128, "normalized": [0.5, 1.0]},
+            },
+            action,
+            candidate,
+            columns=None,
+            profile="production",
+        )
         self.assertNotEqual(production, draft)
         self.assertNotEqual(production, changed_source)
+        self.assertNotEqual(production, changed_pivot)
+
+
+class FixedCanvasGeometryTests(unittest.TestCase):
+    def test_large_provider_canvas_is_reduced_before_png_extraction(self) -> None:
+        geometry = _fixed_canvas_geometry((1152, 704), (288, 176))
+        self.assertEqual(geometry["scaled_width"], 288)
+        self.assertEqual(geometry["scaled_height"], 176)
+        self.assertEqual(geometry["offset_x"], 0)
+        self.assertEqual(geometry["offset_y"], 0)
+        self.assertEqual(geometry["scale"], 0.25)
 
 
 if __name__ == "__main__":

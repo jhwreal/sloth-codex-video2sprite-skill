@@ -22,7 +22,7 @@ SKILL_DIR = Path(__file__).resolve().parent.parent
 PRESETS_PATH = SKILL_DIR / "assets" / "model-presets.json"
 DEFAULT_LOG_MAX_CHARS = 4096
 MAX_SAFE_STRING = 1024
-PROCESSOR_SCHEMA_VERSION = 2
+PROCESSOR_SCHEMA_VERSION = 5
 MEDIA_KEY_FRAGMENTS = (
     "b64",
     "base64",
@@ -133,6 +133,7 @@ def action_processing_fingerprint(action: Dict[str, Any]) -> str:
         {
             "prompt_sha256": action.get("prompt_sha256"),
             "frame_count": action.get("frame_count"),
+            "sampling": action.get("sampling"),
             "columns": action.get("columns"),
             "duration_seconds": action.get("duration_seconds"),
             "window": action.get("window"),
@@ -161,6 +162,9 @@ def candidate_processing_fingerprint(
             "master_sha256": (run_spec.get("master") or {}).get("sha256"),
             "action_fingerprint": action_processing_fingerprint(action),
             "frame_size": run_spec.get("frame_size"),
+            "pivot": run_spec.get("pivot"),
+            "placement": run_spec.get("placement"),
+            "resampling": run_spec.get("resampling"),
             "columns": columns or action.get("columns"),
             "profile": profile,
         }

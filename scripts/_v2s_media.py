@@ -26,6 +26,7 @@ from _v2s_common import (
 
 
 _AUDIO_ENCODER_CACHE: Dict[str, List[str]] = {}
+AUDIO_OUTPUT_GAIN = 0.85
 
 
 def _image_dependencies() -> Tuple[Any, Any]:
@@ -121,6 +122,26 @@ def _clear_numbered_pngs(directory: Path) -> None:
             path.unlink()
 
 
+def _fixed_canvas_geometry(
+    source_size: Tuple[int, int],
+    target_size: Tuple[int, int],
+) -> Dict[str, Any]:
+    source_width, source_height = source_size
+    target_width, target_height = target_size
+    if min(source_width, source_height, target_width, target_height) <= 0:
+        raise Video2SpriteError("Fixed-canvas source and target sizes must be positive")
+    scale = min(target_width / source_width, target_height / source_height)
+    scaled_width = max(1, int(round(source_width * scale)))
+    scaled_height = max(1, int(round(source_height * scale)))
+    return {
+        "scale": scale,
+        "scaled_width": scaled_width,
+        "scaled_height": scaled_height,
+        "offset_x": (target_width - scaled_width) // 2,
+        "offset_y": (target_height - scaled_height) // 2,
+    }
+
+
 def extract_video_frames(
     source: Path,
     output_dir: Path,
@@ -129,6 +150,10 @@ def extract_video_frames(
     start_seconds: float,
     duration_seconds: float,
     ffmpeg: str = "ffmpeg",
+    fixed_source_size: Optional[Tuple[int, int]] = None,
+    fixed_target_size: Optional[Tuple[int, int]] = None,
+    fixed_pad_color: str = "#000000",
+    resampling: str = "lanczos",
 ) -> Tuple[List[Path], List[float]]:
     if frame_count < 1 or frame_count > 512:
         raise Video2SpriteError("Frame count must be between 1 and 512")
@@ -138,6 +163,32 @@ def extract_video_frames(
     output_dir.mkdir(parents=True, exist_ok=True)
     _clear_numbered_pngs(output_dir)
     fps = frame_count / duration_seconds
+    filters = [f"fps={fps:.12f}:round=near"]
+    if bool(fixed_source_size) != bool(fixed_target_size):
+        raise Video2SpriteError(
+            "Fixed-canvas decode requires both source and target sizes"
+        )
+    if fixed_source_size and fixed_target_size:
+        geometry = _fixed_canvas_geometry(fixed_source_size, fixed_target_size)
+        color = "".join(
+            f"{component:02x}" for component in parse_hex_color(fixed_pad_color)
+        )
+        if resampling not in {"nearest", "lanczos"}:
+            raise Video2SpriteError("Resampling must be nearest or lanczos")
+        ffmpeg_filter = "neighbor" if resampling == "nearest" else "lanczos"
+        filters.extend(
+            [
+                (
+                    f"scale={geometry['scaled_width']}:{geometry['scaled_height']}"
+                    f":flags={ffmpeg_filter}"
+                ),
+                (
+                    f"pad={fixed_target_size[0]}:{fixed_target_size[1]}"
+                    f":{geometry['offset_x']}:{geometry['offset_y']}:color=0x{color}"
+                ),
+            ]
+        )
+    filters.append("format=rgb24")
     run_command(
         [
             executable,
@@ -152,7 +203,7 @@ def extract_video_frames(
             "-t",
             f"{duration_seconds:.6f}",
             "-vf",
-            f"fps={fps:.12f}:round=near,format=rgb24",
+            ",".join(filters),
             "-frames:v",
             str(frame_count),
             str(output_dir / "frame_%04d.png"),
@@ -204,21 +255,72 @@ def _key_rgba(
     key_rgb: Tuple[int, int, int],
     threshold: float,
     softness: float,
+    mode: str = "global",
 ) -> Tuple[Any, Dict[str, float]]:
     rgb = rgb_u8.astype(np.float32)
     key = np.asarray(key_rgb, dtype=np.float32)
     distance = np.linalg.norm(rgb - key.reshape(1, 1, 3), axis=2)
-    alpha = np.clip((distance - threshold) / max(softness, 1.0), 0.0, 1.0)
-
-    dominant = int(np.argmax(key))
-    other_channels = [index for index in range(3) if index != dominant]
-    if key[dominant] - max(key[other_channels[0]], key[other_channels[1]]) >= 32:
-        other_max = np.maximum(rgb[..., other_channels[0]], rgb[..., other_channels[1]])
-        excess = np.maximum(rgb[..., dominant] - other_max, 0.0)
-        edge_weight = (1.0 - alpha) * (alpha > 0.0)
-        rgb[..., dominant] = np.maximum(
-            0.0, rgb[..., dominant] - (excess * edge_weight * 0.85)
+    if mode == "global":
+        alpha = np.clip(
+            (distance - threshold) / max(softness, 1.0), 0.0, 1.0
         )
+        dominant = int(np.argmax(key))
+        other_channels = [index for index in range(3) if index != dominant]
+        if (
+            key[dominant]
+            - max(key[other_channels[0]], key[other_channels[1]])
+            >= 32
+        ):
+            other_max = np.maximum(
+                rgb[..., other_channels[0]], rgb[..., other_channels[1]]
+            )
+            excess = np.maximum(rgb[..., dominant] - other_max, 0.0)
+            edge_weight = (1.0 - alpha) * (alpha > 0.0)
+            rgb[..., dominant] = np.maximum(
+                0.0, rgb[..., dominant] - (excess * edge_weight * 0.85)
+            )
+    elif mode == "border":
+        from PIL import Image, ImageDraw
+
+        near_matte = distance <= threshold + softness
+        binary = np.where(near_matte, 0, 255).astype(np.uint8)
+        connectivity = Image.fromarray(
+            np.repeat(binary[..., None], 3, axis=2), mode="RGB"
+        )
+        width, height = connectivity.size
+        seeds = (
+            (0, 0),
+            (max(0, width - 1), 0),
+            (0, max(0, height - 1)),
+            (max(0, width - 1), max(0, height - 1)),
+        )
+        for seed in seeds:
+            if connectivity.getpixel(seed) == (0, 0, 0):
+                ImageDraw.floodfill(
+                    connectivity, seed, (128, 0, 0), thresh=0
+                )
+        connectivity_array = np.asarray(connectivity, dtype=np.uint8)
+        connected = (
+            (connectivity_array[..., 0] == 128)
+            & (connectivity_array[..., 1] == 0)
+            & (connectivity_array[..., 2] == 0)
+        )
+        alpha = np.ones(distance.shape, dtype=np.float32)
+        alpha[connected] = np.clip(
+            (distance[connected] - threshold) / max(softness, 1.0),
+            0.0,
+            1.0,
+        )
+        edge = connected & (alpha > 0.0) & (alpha < 1.0)
+        if np.any(edge):
+            edge_alpha = alpha[edge].reshape(-1, 1)
+            observed = rgb[edge]
+            cleaned = (
+                observed - key.reshape(1, 3) * (1.0 - edge_alpha)
+            ) / np.maximum(edge_alpha, 0.20)
+            rgb[edge] = np.clip(cleaned, 0.0, 255.0)
+    else:
+        raise Video2SpriteError(f"Unsupported matte key mode: {mode}")
 
     alpha_u8 = np.rint(alpha * 255.0).astype(np.uint8)
     rgb_u8_clean = np.rint(np.clip(rgb, 0.0, 255.0)).astype(np.uint8)
@@ -236,10 +338,15 @@ def key_and_pack_frames(
     key_color: str,
     threshold: float,
     softness: float,
+    key_mode: str,
+    placement: str,
+    pivot: Dict[str, Any],
+    resampling: str,
     columns: Optional[int],
     source_times: Sequence[float],
     frame_duration: float,
     png_optimize: bool = True,
+    fixed_source_size: Optional[Tuple[int, int]] = None,
 ) -> Dict[str, Any]:
     Image, np = _image_dependencies()
     if not raw_paths:
@@ -250,6 +357,12 @@ def key_and_pack_frames(
         raise Video2SpriteError("Chroma threshold must be between 0 and 442")
     if softness <= 0.0 or softness > 442.0:
         raise Video2SpriteError("Chroma softness must be greater than 0 and no more than 442")
+    if key_mode not in {"border", "global"}:
+        raise Video2SpriteError("Matte key mode must be border or global")
+    if placement not in {"fixed", "fit-union"}:
+        raise Video2SpriteError("Placement must be fixed or fit-union")
+    if resampling not in {"nearest", "lanczos"}:
+        raise Video2SpriteError("Resampling must be nearest or lanczos")
     target_width, target_height = target_size
     key_rgb = parse_hex_color(key_color)
     raw_bounds: List[Optional[Tuple[int, int, int, int]]] = []
@@ -258,45 +371,88 @@ def key_and_pack_frames(
 
     for path in raw_paths:
         with Image.open(path) as image:
-            rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+            image_size = image.size
+            rgb = (
+                np.asarray(image.convert("RGB"), dtype=np.uint8)
+                if placement == "fit-union"
+                else None
+            )
         if source_shape is None:
-            source_shape = (int(rgb.shape[1]), int(rgb.shape[0]))
-        elif source_shape != (int(rgb.shape[1]), int(rgb.shape[0])):
+            source_shape = (int(image_size[0]), int(image_size[1]))
+        elif source_shape != (int(image_size[0]), int(image_size[1])):
             raise Video2SpriteError("Decoded source frames do not share one size")
-        rgba, corner = _key_rgba(np, rgb, key_rgb, threshold, softness)
-        raw_bounds.append(_alpha_bounds(np, rgba))
-        corner_metrics.append(corner)
+        if rgb is not None:
+            rgba, corner = _key_rgba(
+                np, rgb, key_rgb, threshold, softness, key_mode
+            )
+            raw_bounds.append(_alpha_bounds(np, rgba))
+            corner_metrics.append(corner)
 
-    empty_indices = [index for index, bounds in enumerate(raw_bounds) if bounds is None]
-    if empty_indices:
-        raise Video2SpriteError(
-            "Chroma key removed all foreground from frame(s): "
-            + ", ".join(str(index) for index in empty_indices)
-        )
     assert source_shape is not None
-    union = (
-        min(bounds[0] for bounds in raw_bounds if bounds),
-        min(bounds[1] for bounds in raw_bounds if bounds),
-        max(bounds[2] for bounds in raw_bounds if bounds),
-        max(bounds[3] for bounds in raw_bounds if bounds),
-    )
-    source_width, source_height = source_shape
-    source_margin = max(2, int(round(max(source_width, source_height) * 0.015)))
-    union = (
-        max(0, union[0] - source_margin),
-        max(0, union[1] - source_margin),
-        min(source_width, union[2] + source_margin),
-        min(source_height, union[3] + source_margin),
-    )
+    if placement == "fit-union":
+        empty_indices = [
+            index for index, bounds in enumerate(raw_bounds) if bounds is None
+        ]
+        if empty_indices:
+            raise Video2SpriteError(
+                "Matte key removed all foreground from frame(s): "
+                + ", ".join(str(index) for index in empty_indices)
+            )
+    decoded_width, decoded_height = source_shape
+    if fixed_source_size:
+        if placement != "fixed":
+            raise Video2SpriteError(
+                "A pre-scaled fixed source can only use fixed placement"
+            )
+        if source_shape != (target_width, target_height):
+            raise Video2SpriteError(
+                "Pre-scaled fixed frames must already match the target canvas"
+            )
+        source_width, source_height = fixed_source_size
+    else:
+        source_width, source_height = decoded_width, decoded_height
+    if placement == "fixed":
+        union = (0, 0, source_width, source_height)
+    else:
+        union = (
+            min(bounds[0] for bounds in raw_bounds if bounds),
+            min(bounds[1] for bounds in raw_bounds if bounds),
+            max(bounds[2] for bounds in raw_bounds if bounds),
+            max(bounds[3] for bounds in raw_bounds if bounds),
+        )
+        source_margin = max(
+            2, int(round(max(source_width, source_height) * 0.015))
+        )
+        union = (
+            max(0, union[0] - source_margin),
+            max(0, union[1] - source_margin),
+            min(source_width, union[2] + source_margin),
+            min(source_height, union[3] + source_margin),
+        )
     union_width, union_height = union[2] - union[0], union[3] - union[1]
-    target_padding = max(2, int(round(min(target_width, target_height) * 0.035)))
+    target_padding = (
+        0
+        if placement == "fixed"
+        else max(2, int(round(min(target_width, target_height) * 0.035)))
+    )
     available_width = max(1, target_width - 2 * target_padding)
     available_height = max(1, target_height - 2 * target_padding)
-    scale = min(available_width / union_width, available_height / union_height)
-    scaled_width = max(1, int(round(union_width * scale)))
-    scaled_height = max(1, int(round(union_height * scale)))
-    offset_x = (target_width - scaled_width) // 2
-    offset_y = (target_height - scaled_height) // 2
+    if placement == "fixed":
+        geometry = _fixed_canvas_geometry(
+            (source_width, source_height),
+            (target_width, target_height),
+        )
+        scale = float(geometry["scale"])
+        scaled_width = int(geometry["scaled_width"])
+        scaled_height = int(geometry["scaled_height"])
+        offset_x = int(geometry["offset_x"])
+        offset_y = int(geometry["offset_y"])
+    else:
+        scale = min(available_width / union_width, available_height / union_height)
+        scaled_width = max(1, int(round(union_width * scale)))
+        scaled_height = max(1, int(round(union_height * scale)))
+        offset_x = (target_width - scaled_width) // 2
+        offset_y = (target_height - scaled_height) // 2
 
     output_dir.mkdir(parents=True, exist_ok=True)
     _clear_numbered_pngs(output_dir)
@@ -308,15 +464,59 @@ def key_and_pack_frames(
     baselines: List[float] = []
     edge_touch = False
     frame_entries: List[Dict[str, Any]] = []
+    resize_filter = (
+        Image.Resampling.NEAREST
+        if resampling == "nearest"
+        else Image.Resampling.LANCZOS
+    )
+    resolved_columns = columns or int(math.ceil(math.sqrt(len(raw_paths))))
+    if resolved_columns < 1 or resolved_columns > len(raw_paths):
+        raise Video2SpriteError("Atlas columns must be between 1 and the frame count")
+    rows = int(math.ceil(len(raw_paths) / resolved_columns))
+    atlas = Image.new(
+        "RGBA",
+        (resolved_columns * target_width, rows * target_height),
+        (0, 0, 0, 0),
+    )
 
     for index, raw_path in enumerate(raw_paths):
         with Image.open(raw_path) as image:
-            rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
-        rgba, _ = _key_rgba(np, rgb, key_rgb, threshold, softness)
-        crop = Image.fromarray(rgba, mode="RGBA").crop(union)
-        resized = crop.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
-        cell = Image.new("RGBA", (target_width, target_height), (0, 0, 0, 0))
-        cell.alpha_composite(resized, (offset_x, offset_y))
+            source_image = image.convert("RGB")
+        if placement == "fixed":
+            if fixed_source_size:
+                transformed_rgb = np.asarray(source_image, dtype=np.uint8)
+            else:
+                resized_rgb = source_image.resize(
+                    (scaled_width, scaled_height), resize_filter
+                )
+                matte_cell = Image.new(
+                    "RGB", (target_width, target_height), key_rgb
+                )
+                matte_cell.paste(resized_rgb, (offset_x, offset_y))
+                transformed_rgb = np.asarray(matte_cell, dtype=np.uint8)
+            rgba, corner = _key_rgba(
+                np,
+                transformed_rgb,
+                key_rgb,
+                threshold,
+                softness,
+                key_mode,
+            )
+            corner_metrics.append(corner)
+            cell = Image.fromarray(rgba, mode="RGBA")
+        else:
+            source_rgb = np.asarray(source_image, dtype=np.uint8)
+            rgba, _ = _key_rgba(
+                np, source_rgb, key_rgb, threshold, softness, key_mode
+            )
+            crop = Image.fromarray(rgba, mode="RGBA").crop(union)
+            resized = crop.resize(
+                (scaled_width, scaled_height), resize_filter
+            )
+            cell = Image.new(
+                "RGBA", (target_width, target_height), (0, 0, 0, 0)
+            )
+            cell.alpha_composite(resized, (offset_x, offset_y))
         processed = np.asarray(cell, dtype=np.uint8)
         bounds = _alpha_bounds(np, processed)
         if bounds is None:
@@ -340,26 +540,19 @@ def key_and_pack_frames(
             compress_level=9 if png_optimize else 1,
         )
         processed_paths.append(output_path)
+        atlas.alpha_composite(
+            cell,
+            (
+                (index % resolved_columns) * target_width,
+                (index // resolved_columns) * target_height,
+            ),
+        )
         if index == 0:
             first_processed = processed.copy()
         if index == len(raw_paths) - 1:
             last_processed = processed.copy()
 
-    resolved_columns = columns or int(math.ceil(math.sqrt(len(processed_paths))))
-    if resolved_columns < 1 or resolved_columns > len(processed_paths):
-        raise Video2SpriteError("Atlas columns must be between 1 and the frame count")
-    rows = int(math.ceil(len(processed_paths) / resolved_columns))
-    atlas = Image.new(
-        "RGBA",
-        (resolved_columns * target_width, rows * target_height),
-        (0, 0, 0, 0),
-    )
     for index, path in enumerate(processed_paths):
-        with Image.open(path) as frame:
-            atlas.alpha_composite(
-                frame.convert("RGBA"),
-                ((index % resolved_columns) * target_width, (index // resolved_columns) * target_height),
-            )
         bounds = processed_bounds[index]
         frame_entries.append(
             {
@@ -381,9 +574,12 @@ def key_and_pack_frames(
                     "height": bounds[3] - bounds[1],
                 },
                 "pivot": {
-                    "x": round(target_width / 2.0, 3),
-                    "y": float(target_height),
-                    "normalized": [0.5, 1.0],
+                    "x": float(pivot["x"]),
+                    "y": float(pivot["y"]),
+                    "normalized": [
+                        float(pivot["normalized"][0]),
+                        float(pivot["normalized"][1]),
+                    ],
                 },
             }
         )
@@ -434,6 +630,10 @@ def key_and_pack_frames(
             },
             "shared_scale": round(scale, 8),
             "target_offset": [offset_x, offset_y],
+            "placement": placement,
+            "resampling": resampling,
+            "matte_key_mode": key_mode,
+            "pivot": pivot,
         },
         "metrics": {
             "empty_frames": [],
@@ -515,7 +715,7 @@ def extract_audio(
             "-map",
             "0:a:0",
             "-af",
-            "asetpts=PTS-STARTPTS",
+            f"volume={AUDIO_OUTPUT_GAIN:.2f},asetpts=PTS-STARTPTS",
             *encoder_args,
             str(destination),
         ],
@@ -528,6 +728,7 @@ def extract_audio(
         "path": destination.name,
         "sha256": sha256_file(destination),
         "bytes": destination.stat().st_size,
+        "gain": AUDIO_OUTPUT_GAIN,
     }
 
 
@@ -740,11 +941,17 @@ def _qc_report(
             "review",
             "Source corner color variance suggests a non-flat background",
         )
-    if metrics["corner_distance_from_key_mean"] > 42.0:
+    chroma = action.get("chroma") or {}
+    matte_tolerance = max(
+        18.0,
+        float(chroma.get("threshold", 42.0))
+        + float(chroma.get("softness", 36.0)) * 0.5,
+    )
+    if metrics["corner_distance_from_key_mean"] > matte_tolerance:
         add(
             "background_key_mismatch",
             "review",
-            "Source corners differ materially from the configured chroma key",
+            "Source corners differ materially from the configured matte key",
         )
     if metrics["alpha_area_cv"] > 0.55:
         add("alpha_area_variation", "review", "Foreground area changes substantially")
@@ -828,7 +1035,23 @@ def process_candidate_media(
     key_color = str(chroma.get("key") or "#00ff00")
     threshold = float(chroma.get("threshold", 42.0))
     softness = float(chroma.get("softness", 36.0))
+    key_mode = str(chroma.get("mode") or "global")
+    placement = str(run_spec.get("placement") or "fit-union")
+    resampling = str(run_spec.get("resampling") or "lanczos")
+    pivot = run_spec.get("pivot") or {
+        "x": target_size[0] / 2.0,
+        "y": float(target_size[1]),
+        "normalized": [0.5, 1.0],
+    }
     frame_duration = duration_seconds / frame_count
+    fixed_source_size = (
+        (
+            int(source_probe["video"]["width"]),
+            int(source_probe["video"]["height"]),
+        )
+        if placement == "fixed"
+        else None
+    )
 
     with tempfile.TemporaryDirectory(prefix="video2sprite-frames-") as raw_temp:
         raw_paths, source_times = extract_video_frames(
@@ -838,6 +1061,10 @@ def process_candidate_media(
             start_seconds=start_seconds,
             duration_seconds=duration_seconds,
             ffmpeg=ffmpeg,
+            fixed_source_size=fixed_source_size,
+            fixed_target_size=target_size if fixed_source_size else None,
+            fixed_pad_color=key_color,
+            resampling=resampling,
         )
         frame_result = key_and_pack_frames(
             raw_paths,
@@ -847,10 +1074,15 @@ def process_candidate_media(
             key_color=key_color,
             threshold=threshold,
             softness=softness,
+            key_mode=key_mode,
+            placement=placement,
+            pivot=pivot,
+            resampling=resampling,
             columns=columns or action.get("columns"),
             source_times=source_times,
             frame_duration=frame_duration,
             png_optimize=png_optimize,
+            fixed_source_size=fixed_source_size,
         )
 
     audio_result = extract_audio(
@@ -898,6 +1130,11 @@ def process_candidate_media(
         "duration_seconds": round(duration_seconds, 6),
         "fps": round(frame_count / duration_seconds, 6),
         "frame_count": frame_count,
+        "sampling": action.get("sampling")
+        or {
+            "mode": "count",
+            "fps": round(frame_count / duration_seconds, 6),
+        },
         "atlas": frame_result["atlas"],
         "frames": frame_result["frames"],
         "audio": audio_result,
@@ -948,6 +1185,7 @@ def process_candidate_media(
             "source": "source.mp4",
             "preview": "preview.mp4",
             "atlas": "atlas.png",
+            "manifest": "manifest.json",
             "audio": "sfx.ogg" if audio_result.get("present") else None,
         },
         "qc": qc,

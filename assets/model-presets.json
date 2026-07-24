@@ -29,24 +29,60 @@
             "model_id": "doubao-seedance-2-0-260128",
             "native_audio": true,
             "image_to_video": true,
+            "supports_seed": false,
+            "duration_seconds": {
+              "minimum": 4,
+              "maximum": 15,
+              "integer_only": true
+            },
+            "resolutions": ["480p", "720p", "1080p", "4k"],
+            "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+            "reference_roles": ["first_frame", "reference_image"],
             "tier": "quality"
           },
           "seedance-2.0-fast": {
             "model_id": "doubao-seedance-2-0-fast-260128",
             "native_audio": true,
             "image_to_video": true,
+            "supports_seed": false,
+            "duration_seconds": {
+              "minimum": 4,
+              "maximum": 15,
+              "integer_only": true
+            },
+            "resolutions": ["480p", "720p"],
+            "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+            "reference_roles": ["first_frame", "reference_image"],
             "tier": "speed"
           },
           "seedance-1.5-pro": {
             "model_id": "doubao-seedance-1-5-pro-251215",
             "native_audio": true,
             "image_to_video": true,
+            "supports_seed": true,
+            "duration_seconds": {
+              "minimum": 4,
+              "maximum": 12,
+              "integer_only": true
+            },
+            "resolutions": ["480p", "720p", "1080p"],
+            "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+            "reference_roles": ["first_frame"],
             "tier": "comparison"
           },
           "seedance-1.0-pro": {
             "model_id": "doubao-seedance-1-0-pro-250528",
             "native_audio": false,
             "image_to_video": true,
+            "supports_seed": true,
+            "duration_seconds": {
+              "minimum": 2,
+              "maximum": 12,
+              "integer_only": false
+            },
+            "resolutions": ["480p", "720p", "1080p"],
+            "ratios": ["16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive"],
+            "reference_roles": ["first_frame"],
             "tier": "legacy"
           }
         }

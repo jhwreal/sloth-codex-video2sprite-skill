@@ -1,94 +1,123 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Video2Sprite Review</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>动作资产工作台</title>
   <style>
-    :root { color-scheme: dark; font-family: ui-sans-serif, system-ui, sans-serif; }
-    body { margin: 0; background: #0e1117; color: #edf2f7; }
-    main { max-width: 1180px; margin: auto; padding: 24px; }
-    h1 { margin: 0 0 8px; font-size: 28px; }
-    .muted { color: #9aa7b6; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin-top: 20px; }
-    .card { background: #171c24; border: 1px solid #2a3442; border-radius: 12px; padding: 16px; }
-    video, img { width: 100%; max-height: 480px; object-fit: contain; border-radius: 8px; background-color: #202735;
-      background-image: linear-gradient(45deg,#344052 25%,transparent 25%),linear-gradient(-45deg,#344052 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#344052 75%),linear-gradient(-45deg,transparent 75%,#344052 75%);
-      background-size: 24px 24px; background-position: 0 0,0 12px,12px -12px,-12px 0; }
-    pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; color: #c8d3df; }
-    textarea { box-sizing: border-box; width: 100%; min-height: 90px; padding: 10px; border-radius: 8px; border: 1px solid #3a4657; background: #0e1117; color: #edf2f7; }
-    .scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 14px 0; }
-    .scores label { color: #c8d3df; font-size: 13px; }
-    .scores input { box-sizing: border-box; width: 100%; margin-top: 5px; padding: 8px; border-radius: 7px; border: 1px solid #3a4657; background: #0e1117; color: #edf2f7; }
-    button { border: 0; border-radius: 8px; padding: 11px 18px; margin: 10px 8px 0 0; font-weight: 700; cursor: pointer; }
-    .approve { background: #35c98b; color: #07150f; }
-    .reject { background: #ff667d; color: #20070b; }
-    #status { margin-left: 8px; }
+    :root { color-scheme: dark; font: 15px/1.45 system-ui, sans-serif; background: #090d16; color: #edf2ff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+    header { padding: 12px 18px; border-bottom: 1px solid #28334b; background: #101728; }
+    h1, h2, p { margin: 0; }
+    h1 { font-size: 19px; }
+    #subtitle { margin-top: 3px; color: #9eabc1; font-size: 13px; }
+    main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 34vw); min-height: calc(100vh - 65px); }
+    #frames { align-content: start; display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; padding: 14px; overflow: auto; }
+    .frame { margin: 0; min-width: 0; border: 1px solid #28334b; border-radius: 9px; overflow: hidden; background: #121a2b; cursor: pointer; }
+    .frame:hover { border-color: #61789f; }
+    .frame:focus-visible { outline: 3px solid #8ab4ff; outline-offset: 2px; }
+    .frame.selected { border-color: #8ab4ff; box-shadow: 0 0 0 2px #8ab4ff inset; background: #1a2942; }
+    .frame img, video, #selected-frame { display: block; width: 100%; object-fit: contain; image-rendering: pixelated; background-color: #172135;
+      background-image: linear-gradient(45deg,#26344d 25%,transparent 25%),linear-gradient(-45deg,#26344d 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#26344d 75%),linear-gradient(-45deg,transparent 75%,#26344d 75%);
+      background-size: 20px 20px; background-position: 0 0,0 10px,10px -10px,-10px 0; }
+    .frame img { aspect-ratio: 18 / 11; }
+    figcaption { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; color: #aeb9cd; font-size: 12px; font-variant-numeric: tabular-nums; }
+    aside { position: sticky; top: 0; display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 65px); min-height: 0; padding: 16px; border-left: 1px solid #28334b; background: #101728; overflow: hidden; }
+    aside h2 { margin-bottom: 10px; font-size: 16px; }
+    .viewer-panel { display: flex; flex-direction: column; min-height: 0; }
+    .video-panel { flex: 0 1 47%; }
+    .still-panel { flex: 1 1 53%; }
+    .viewer-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+    #timing, #selected-label { color: #aeb9cd; font-size: 12px; font-variant-numeric: tabular-nums; }
+    video { flex: 1; min-height: 0; border-radius: 10px; }
+    #selected-frame { flex: 1; min-height: 0; border: 1px solid #28334b; border-radius: 10px; }
+    @media (max-width: 820px) {
+      main { grid-template-columns: 1fr; }
+      aside { position: static; height: auto; overflow: visible; border-left: 0; border-top: 1px solid #28334b; }
+      #frames { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+      video, #selected-frame { min-height: 42vh; }
+    }
   </style>
 </head>
 <body>
-<main>
-  <h1 id="title">Video2Sprite Review</h1>
-  <div id="subtitle" class="muted"></div>
-  <section class="grid">
-    <article class="card"><h2>Raw source with sound</h2><video id="source" controls loop></video></article>
-    <article class="card"><h2>Processed transparent preview</h2><video id="preview" controls loop></video></article>
-    <article class="card"><h2>Atlas</h2><img id="atlas" alt="Sprite atlas"></article>
-    <article class="card"><h2>QC and provenance</h2><pre id="metrics"></pre></article>
-  </section>
-  <section class="card" style="margin-top:16px">
-    <h2>Decision</h2>
-    <div class="scores">
-      <label>Visual identity<input id="score-visual" type="number" min="1" max="5" step="1" value="3"></label>
-      <label>Motion quality<input id="score-motion" type="number" min="1" max="5" step="1" value="3"></label>
-      <label>Audio quality<input id="score-audio" type="number" min="1" max="5" step="1" value="3"></label>
-      <label>A/V sync<input id="score-sync" type="number" min="1" max="5" step="1" value="3"></label>
-      <label>Overall<input id="score-overall" type="number" min="1" max="5" step="1" value="3"></label>
-    </div>
-    <textarea id="note" placeholder="Describe identity, motion, transparency, audio, sync, or rejection issues."></textarea>
-    <div>
-      <button class="approve" data-decision="approved">Approve</button>
-      <button class="reject" data-decision="rejected">Reject</button>
-      <span id="status" class="muted"></span>
-    </div>
-  </section>
-</main>
-<script>
-let reviewData;
-async function load() {
-  reviewData = await fetch("review-data.json", {cache:"no-store"}).then(r => r.json());
-  document.querySelector("#title").textContent = `${reviewData.action_id} · ${reviewData.candidate_id}`;
-  document.querySelector("#subtitle").textContent = `${reviewData.provider} / ${reviewData.model_id} · QC ${reviewData.qc.status}`;
-  document.querySelector("#source").src = reviewData.paths.source;
-  document.querySelector("#preview").src = reviewData.paths.preview;
-  document.querySelector("#atlas").src = reviewData.paths.atlas;
-  document.querySelector("#metrics").textContent = JSON.stringify({qc: reviewData.qc, manifest: reviewData.manifest_summary}, null, 2);
-}
-async function decide(decision) {
-  const status = document.querySelector("#status");
-  status.textContent = "Saving…";
-  const response = await fetch("/api/decision", {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify({
-      action_id: reviewData.action_id,
-      candidate_id: reviewData.candidate_id,
-      decision,
-      note: document.querySelector("#note").value,
-      scores: {
-        visual: Number(document.querySelector("#score-visual").value),
-        motion: Number(document.querySelector("#score-motion").value),
-        audio: Number(document.querySelector("#score-audio").value),
-        sync: Number(document.querySelector("#score-sync").value),
-        overall: Number(document.querySelector("#score-overall").value)
+  <header><h1 id="title">动作资产工作台</h1><div id="subtitle">正在加载关键帧…</div></header>
+  <main>
+    <section id="frames" aria-label="全部关键帧"></section>
+    <aside>
+      <section class="viewer-panel video-panel" aria-labelledby="video-heading">
+        <div class="viewer-heading"><h2 id="video-heading">动作播放</h2><span id="timing"></span></div>
+        <video id="preview" controls loop playsinline></video>
+      </section>
+      <section class="viewer-panel still-panel" aria-labelledby="still-heading">
+        <div class="viewer-heading"><h2 id="still-heading">单帧查看</h2><span id="selected-label">请选择左侧帧</span></div>
+        <img id="selected-frame" alt="当前选中的动作帧">
+      </section>
+    </aside>
+  </main>
+  <script>
+    const byId = id => document.getElementById(id);
+    const safePath = value => value ? encodeURI(value) : "";
+    let selectedFigure;
+
+    function selectFrame(frame, figure) {
+      if (selectedFigure) {
+        selectedFigure.classList.remove("selected");
+        selectedFigure.setAttribute("aria-selected", "false");
       }
-    })
-  });
-  const body = await response.json();
-  status.textContent = response.ok ? `Saved: ${body.decision}` : `Error: ${body.error || response.status}`;
-}
-document.querySelectorAll("button[data-decision]").forEach(button => button.addEventListener("click", () => decide(button.dataset.decision)));
-load().catch(error => { document.querySelector("#status").textContent = error.message; });
-</script>
+      selectedFigure = figure;
+      figure.classList.add("selected");
+      figure.setAttribute("aria-selected", "true");
+      const index = Number(frame.index) + 1;
+      const time = Number(frame.source_time_seconds || 0);
+      byId("selected-frame").src = safePath(frame.file);
+      byId("selected-frame").alt = `第 ${index} 帧，${time.toFixed(3)} 秒`;
+      byId("selected-label").textContent = `#${String(index).padStart(2, "0")} · ${time.toFixed(3)}s`;
+    }
+
+    function renderFrames(manifest) {
+      const container = byId("frames");
+      container.replaceChildren();
+      selectedFigure = null;
+      for (const frame of manifest.frames || []) {
+        const figure = document.createElement("figure");
+        figure.className = "frame";
+        figure.tabIndex = 0;
+        figure.setAttribute("role", "button");
+        figure.setAttribute("aria-selected", "false");
+        const image = document.createElement("img");
+        image.loading = "lazy";
+        image.alt = `第 ${Number(frame.index) + 1} 帧`;
+        image.src = safePath(frame.file);
+        const caption = document.createElement("figcaption");
+        const number = document.createElement("span");
+        number.textContent = `#${String(Number(frame.index) + 1).padStart(2, "0")}`;
+        const time = document.createElement("span");
+        time.textContent = `${Number(frame.source_time_seconds || 0).toFixed(3)}s`;
+        caption.append(number, time);
+        figure.append(image, caption);
+        figure.onclick = () => selectFrame(frame, figure);
+        figure.onkeydown = event => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            selectFrame(frame, figure);
+          }
+        };
+        container.appendChild(figure);
+        if (!selectedFigure) selectFrame(frame, figure);
+      }
+    }
+
+    async function load() {
+      const reviewData = await fetch("review-data.json", {cache: "no-store"}).then(response => response.json());
+      const manifest = await fetch(reviewData.paths?.manifest || "manifest.json", {cache: "no-store"}).then(response => response.json());
+      byId("title").textContent = reviewData.action_id;
+      byId("subtitle").textContent = `${reviewData.candidate_id} · ${reviewData.model_id}`;
+      byId("preview").src = safePath(reviewData.paths?.preview);
+      byId("timing").textContent = `${manifest.frame_count} 帧 · ${manifest.fps} fps · ${manifest.duration_seconds}s`;
+      renderFrames(manifest);
+    }
+    load().catch(error => { byId("subtitle").textContent = error.message; });
+  </script>
 </body>
 </html>

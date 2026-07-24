@@ -20,6 +20,13 @@ CLI = SCRIPTS / "video2sprite.py"
 sys.path.insert(0, str(SCRIPTS))
 
 import video2sprite
+from _v2s_media import (
+    _key_rgba,
+    analyze_audio,
+    extract_audio,
+    extract_video_frames,
+    probe_media,
+)
 from review_server import build_review_queue, create_run_server, write_decision
 
 
@@ -117,6 +124,16 @@ class OfflineEndToEndTests(unittest.TestCase):
             str(self.master),
             "--frame-size",
             "128x128",
+            "--placement",
+            "fit-union",
+            "--chroma-key",
+            "#00ff00",
+            "--chroma-mode",
+            "global",
+            "--chroma-threshold",
+            "42",
+            "--chroma-softness",
+            "36",
         )
         self.assertEqual(initialized["video_default"]["model_alias"], "seedance-2.0")
 
@@ -128,8 +145,8 @@ class OfflineEndToEndTests(unittest.TestCase):
             "attack",
             "--prompt",
             "A concise side-view attack",
-            "--frames",
-            "8",
+            "--fps",
+            "4",
             "--duration",
             "2",
             "--audio-required",
@@ -214,9 +231,14 @@ class OfflineEndToEndTests(unittest.TestCase):
         self.assertEqual((candidate / "atlas.png").stat().st_mtime_ns, atlas_mtime)
         self.assertEqual((candidate / "preview.mp4").stat().st_mtime_ns, preview_mtime)
         self.assertEqual((candidate / "approval.json").stat().st_mtime_ns, approval_mtime)
-        status = self._cli("status", "--run-dir", str(self.run_dir), "--compact")
+        status = self._cli("status", "--run-dir", str(self.run_dir))
         approval_state = status["actions"][0]["candidates"][0]["approval"]
         self.assertEqual(approval_state, {"decision": "approved", "valid": True})
+        compact_status = self._cli(
+            "status", "--run-dir", str(self.run_dir), "--compact"
+        )
+        self.assertNotIn("actions", compact_status)
+        self.assertEqual(compact_status["approvals"]["approved"], 1)
         comparison = self._cli("compare", "--run-dir", str(self.run_dir))
         self.assertEqual(comparison["ranking"][0]["ranking_score"], 4.5)
         self.assertTrue(comparison["recommendation"]["provisional"])
@@ -329,6 +351,14 @@ class OfflineEndToEndTests(unittest.TestCase):
         queue = build_review_queue(self.run_dir)["queue"]
         self.assertEqual(len(queue["entries"]), 3)
         self.assertTrue((self.run_dir / "review.html").is_file())
+        reviewer_html = (self.run_dir / "review.html").read_text(encoding="utf-8")
+        self.assertIn("全部关键帧", reviewer_html)
+        self.assertIn('id="selected-frame"', reviewer_html)
+        self.assertIn("selectFrame(frame, manifestPath, figure)", reviewer_html)
+        self.assertNotIn('id="note"', reviewer_html)
+        self.assertNotIn('id="use"', reviewer_html)
+        self.assertNotIn('id="redo"', reviewer_html)
+        self.assertNotIn("人工评分", reviewer_html)
         try:
             server, review_count = create_run_server(self.run_dir)
         except PermissionError:
@@ -382,6 +412,213 @@ class OfflineEndToEndTests(unittest.TestCase):
             self.assertNotIn("data:image", serialized, msg=str(json_path))
             self.assertNotIn('"b64_json"', serialized, msg=str(json_path))
             self.assertNotIn("bearer ", serialized, msg=str(json_path))
+
+    def test_dark_border_matte_preserves_enclosed_dark_costume_pixels(self) -> None:
+        import numpy as np
+
+        matte = (63, 0, 80)
+        rgb = np.empty((64, 64, 3), dtype=np.uint8)
+        rgb[:] = matte
+        rgb[14:54, 18:46] = (220, 176, 92)
+        rgb[24:44, 25:39] = matte
+        rgba, _ = _key_rgba(
+            np,
+            rgb,
+            matte,
+            threshold=8.0,
+            softness=16.0,
+            mode="border",
+        )
+        self.assertEqual(int(rgba[0, 0, 3]), 0)
+        self.assertEqual(int(rgba[32, 32, 3]), 255)
+        self.assertEqual(tuple(int(value) for value in rgba[32, 32, :3]), matte)
+
+    def test_fixed_decode_writes_only_target_canvas_pixels(self) -> None:
+        output = self.root / "scaled-decode"
+        paths, _ = extract_video_frames(
+            self.video,
+            output,
+            frame_count=8,
+            start_seconds=0,
+            duration_seconds=2,
+            fixed_source_size=(160, 120),
+            fixed_target_size=(80, 64),
+            fixed_pad_color="#3f0050",
+            resampling="lanczos",
+        )
+        self.assertEqual(len(paths), 8)
+        with self.Image.open(paths[0]) as frame:
+            self.assertEqual(frame.size, (80, 64))
+
+    def test_fixed_dark_24fps_action_preserves_full_window(self) -> None:
+        matte = (63, 0, 80)
+        run_dir = self.root / "dark-run"
+        master = self.root / "dark-master.png"
+        video = self.root / "dark-source.mp4"
+        raw_frames = self.root / "dark-frames"
+        raw_frames.mkdir()
+        master_image = self.Image.new("RGB", (160, 96), matte)
+        master_draw = self.ImageDraw.Draw(master_image)
+        master_draw.rectangle((62, 18, 88, 80), fill=(235, 195, 112))
+        master_image.save(master, format="PNG")
+        for index in range(48):
+            image = self.Image.new("RGB", (160, 96), matte)
+            draw = self.ImageDraw.Draw(image)
+            x = 52 + int(round(24 * index / 47))
+            draw.rectangle((x, 18, x + 26, 80), fill=(235, 195, 112))
+            draw.rectangle((x + 9, 34, x + 17, 60), fill=matte)
+            image.save(raw_frames / f"frame_{index:04d}.png", format="PNG")
+        subprocess.run(
+            [
+                shutil.which("ffmpeg") or "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-framerate",
+                "24",
+                "-i",
+                str(raw_frames / "frame_%04d.png"),
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                str(video),
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self._cli(
+            "init",
+            "--run-dir",
+            str(run_dir),
+            "--character-id",
+            "dark-hero",
+            "--master",
+            str(master),
+            "--frame-size",
+            "160x96",
+            "--pivot",
+            "80,80",
+            "--placement",
+            "fixed",
+            "--resampling",
+            "nearest",
+        )
+        self._cli(
+            "add-action",
+            "--run-dir",
+            str(run_dir),
+            "--action-id",
+            "slash",
+            "--prompt",
+            "One right-facing slash",
+            "--fps",
+            "24",
+            "--duration",
+            "2",
+        )
+        self._cli(
+            "attach-video",
+            "--run-dir",
+            str(run_dir),
+            "--action-id",
+            "slash",
+            "--candidate",
+            "local",
+            "--video",
+            str(video),
+        )
+        processed = self._cli(
+            "process",
+            "--run-dir",
+            str(run_dir),
+            "--action-id",
+            "slash",
+            "--candidate",
+            "local",
+        )
+        self.assertEqual(processed["frame_count"], 48)
+        candidate = run_dir / "actions" / "slash" / "candidates" / "local"
+        manifest = json.loads(
+            (candidate / "manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(manifest["fps"], 24.0)
+        self.assertEqual(manifest["sampling"]["requested_fps"], 24.0)
+        self.assertEqual(manifest["transform"]["placement"], "fixed")
+        self.assertEqual(
+            manifest["frames"][0]["pivot"],
+            {"x": 80.0, "y": 80.0, "normalized": [0.5, 0.83333333]},
+        )
+        self.assertEqual(len(list((candidate / "frames").glob("frame_*.png"))), 48)
+
+
+class AudioHeadroomTests(unittest.TestCase):
+    def test_hot_source_is_exported_with_codec_safe_headroom(self) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        ffprobe = shutil.which("ffprobe")
+        if not ffmpeg or not ffprobe:
+            self.skipTest("FFmpeg or FFprobe is unavailable")
+        try:
+            import numpy  # noqa: F401
+            from PIL import Image  # noqa: F401
+        except ImportError:
+            self.skipTest("Pillow or NumPy is unavailable")
+
+        with tempfile.TemporaryDirectory(prefix="video2sprite-audio-") as raw_temp:
+            temp = Path(raw_temp)
+            source = temp / "hot.wav"
+            destination = temp / "headroom.ogg"
+            subprocess.run(
+                [
+                    ffmpeg,
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=880:sample_rate=48000:duration=1",
+                    "-af",
+                    "volume=8",
+                    "-c:a",
+                    "pcm_s16le",
+                    str(source),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            source_metrics = analyze_audio(
+                source,
+                frame_count=4,
+                action_duration=1.0,
+                event_names=[],
+                ffmpeg=ffmpeg,
+            )
+            self.assertGreaterEqual(source_metrics["peak"], 0.99)
+
+            result = extract_audio(
+                source,
+                destination,
+                start_seconds=0.0,
+                duration_seconds=1.0,
+                source_probe=probe_media(source, ffprobe=ffprobe),
+                ffmpeg=ffmpeg,
+            )
+            output_metrics = analyze_audio(
+                destination,
+                frame_count=4,
+                action_duration=1.0,
+                event_names=[],
+                ffmpeg=ffmpeg,
+            )
+            self.assertTrue(result["present"])
+            self.assertEqual(result["gain"], 0.85)
+            self.assertGreater(output_metrics["peak"], 0.70)
+            self.assertLess(output_metrics["peak"], 0.98)
 
 
 if __name__ == "__main__":

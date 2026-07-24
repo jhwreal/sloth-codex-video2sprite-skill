@@ -1,6 +1,6 @@
 # sloth-codex-video2sprite-skill
 
-一个面向 Codex 的高效率 2D 游戏资产流水线：先用 GPT Image 2 生成一致的角色母图，再用用户选择的视频模型生成单动作、带声音的短视频，最后完全在本地完成切帧、抠色、统一对齐、图集、音效、质检、审核和打包。
+一个对最终游戏资产直接负责、且不依赖其他精灵 Skill 的 2D 流水线：先确定角色母图，再用用户选择的视频模型生成单动作、带声音的短视频，最后完全在本地完成原帧率切帧、深色哑光去背、固定锚点、图集、音效、质检、结果选择和 Godot 打包。
 
 Seedream 属于图像生成方向；本项目的默认母图引擎是 GPT Image 2。Seedance 用于视频，但不硬编码为唯一选择。仓库内置 Seedance 2.0、2.0 Fast、1.5 Pro 和 1.0 Pro 别名，也允许直接传入账号实际可用的完整模型 ID。
 
@@ -8,11 +8,16 @@ Seedream 属于图像生成方向；本项目的默认母图引擎是 GPT Image 
 
 - 高质量透明精灵动画，并保留动作原生音效。
 - 图片、视频、音频和 Base64 永远不进入 Codex 对话上下文。
-- 视频只解码一次；所有帧使用同一个裁切和缩放变换。
-- 自动 QC 后通过 localhost 页面人工看画面、听声音并评分。
+- 有效动作窗口可按原生 24fps 完整保留，不再把高速动作稀疏抽成几帧。
+- 默认不用绿幕；只删除与画面边缘连通的深色哑光，并清理半透明边缘串色。
+- 视频只解码一次；所有帧使用同一个固定画布变换和明确脚底锚点。
+- localhost 工作台左侧铺满逐帧图，右侧上方循环播放动作视频、下方放大显示当前点击的单帧；页面不放评分、备注或审核按钮，用户直接在对话里决定采用或重做。
 - 用小型指标比较多个模型，再由用户决定默认模型。
 - 整个 run 一次并发轮询和处理，避免每个动作来回操作。
+- 首个付费远程样片未确认前默认禁止跨动作批量提交，防止跑错项目后继续烧预算。
 - 输入未变化时直接命中处理缓存，不重复切帧、不让审核失效。
+- 同一 Image 2 母图请求会按指纹复用，不会因重复命令再次计费。
+- 固定画布在 FFmpeg 解帧时直接缩到目标尺寸，避免先写整套大分辨率 PNG。
 - 草稿/成品双档、默认两个远端候选上限，避免无边界重试。
 
 ## 快速检查
@@ -24,6 +29,18 @@ python scripts/video2sprite.py models
 
 完整流程见 [`SKILL.md`](SKILL.md)。环境变量示例见 [`.env.example`](.env.example)，但程序不会自动读取 `.env`；请通过 shell 或密钥管理器加载，避免凭据进入日志和任务文件。
 
+火山任务可直接使用 run 内的规范母图：
+
+```bash
+python scripts/video2sprite.py submit \
+  --run-dir /absolute/path/to/run \
+  --action-id attack \
+  --reference-file /absolute/path/to/run/master/source.png \
+  --model seedance-2.0
+```
+
+本地图片只会在 provider worker 内临时编码；候选记录和终端输出仅保留路径、哈希与尺寸。
+
 ## 模型选择
 
 默认值可通过环境变量设置：
@@ -32,13 +49,13 @@ python scripts/video2sprite.py models
 export VIDEO2SPRITE_VIDEO_MODEL=seedance-2.0-fast
 ```
 
-某次任务可用 `--model` 覆盖。为同一动作创建多个候选、在审核页评分后运行：
+某次任务可用 `--model` 覆盖。只有在确实需要比较模型时，才为同一动作创建多个候选并运行：
 
 ```bash
 python scripts/video2sprite.py compare --run-dir /absolute/path/to/run
 ```
 
-`compare` 只读取模型、耗时、QC 和人工评分，不读取媒体。它不会自动修改环境变量；少于四类代表动作时，推荐结果会明确标记为暂定。
+`compare` 只读取模型、耗时、QC、采用/重做决定和可选的历史评分元数据，不读取媒体。它不会自动修改环境变量；少于四类代表动作时，推荐结果会明确标记为暂定。
 
 ## 高效批量推进
 
@@ -48,16 +65,17 @@ python scripts/video2sprite.py compare --run-dir /absolute/path/to/run
 python scripts/video2sprite.py advance \
   --run-dir /absolute/path/to/run \
   --process-ready \
-  --profile draft
+  --profile draft \
+  --wait-seconds 50
 ```
 
-它只并发轮询已存在的任务、下载已完成视频并处理就绪候选，绝不会自动提交或产生新计费任务。相同输入再次执行 `process` 会返回 `cached: true`。审核整批候选只需一个本地页面：
+它在最多 55 秒的窗口内并发轮询已存在的任务、下载已完成视频并处理就绪候选，只输出一次有界摘要，绝不会自动提交或产生新计费任务。相同输入再次执行 `process` 会返回 `cached: true`。查看整批候选只需一个本地工作台：
 
 ```bash
 python scripts/video2sprite.py review --run-dir /absolute/path/to/run
 ```
 
-草稿只用于模型和动作选择。最终候选需要用 `--profile production` 重建并重新审核，打包器会拒绝草稿产物。详细策略见 [`references/efficiency.md`](references/efficiency.md)。
+草稿只用于模型和动作选择。最终候选需要用 `--profile production` 重建并再次确认，打包器会拒绝草稿产物。详细策略见 [`references/efficiency.md`](references/efficiency.md)。
 
 ## 本地输出
 

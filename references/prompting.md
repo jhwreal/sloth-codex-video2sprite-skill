@@ -7,11 +7,17 @@ Request:
 - one complete character;
 - approved view and proportions;
 - centered full body with generous margin;
-- flat solid chroma background;
+- flat solid extraction matte;
 - no scenery, floor, shadow, text, guides, frame, or UI;
 - stable palette, costume, props, handedness, and silhouette.
+- every required held prop visibly seated in the correct hand or joined hands,
+  with no gap or floating grip;
+- only brief-required equipment, with no unrelated gun, holster, scabbard,
+  sheath, pouch, backpack, or secondary prop.
 
-Choose a chroma color absent from the character and intended visual effects.
+Default to a dark non-green matte absent from the character and intended visual
+effects. For a navy character, prefer a distinct dark aubergine or oxblood hue
+instead of blue-black.
 
 ## Action video
 
@@ -20,12 +26,40 @@ Use one action per clip. State:
 - fixed orthographic-like camera;
 - no pan, zoom, shake, crop change, cut, transition, or depth-of-field shift;
 - complete character visible for the entire clip;
-- flat unchanging chroma background with no floor or shadow;
+- flat unchanging dark matte with no floor, green screen, shadow, gradient, rim
+  light, or texture;
 - preserve the exact reference identity, view, scale, outfit, palette, props, and handedness;
-- describe anticipation, action, impact, recovery, and end pose in temporal order;
+- identify the footage as a 2D game-sprite source, not a cinematic scene;
+- describe anticipation, acceleration, impact, follow-through, recovery, and the
+  still end pose in temporal order;
+- keep the foot root at one image coordinate and return a one-shot action to the
+  opening ready pose;
 - request only diegetic action sound: no music, dialogue, narration, ambience, or reverb tail.
 
-For a loop, require the last pose and velocity to connect to the first. For a one-shot action, hold the start and end poses briefly so the local processor can detect the active interval.
+For a loop, require the last pose and velocity to connect to the first. For a
+one-shot action, hold the start and end poses briefly so the local processor can
+retain the full-rate motion window while omitting only redundant padding.
+
+For a linked multi-input combo, describe all impacts in one continuous temporal
+sequence and explicitly forbid an idle reset between them. Require a short,
+readable bridge pose after each middle impact so the continuous source can be
+split into one gameplay action per input. Only the final stage returns to combat
+idle. Ask for exactly the requested hit count and one synchronized sound
+transient per hit.
+
+For a side-view attack that alternates into and out of the picture plane,
+declare the axes before describing motion. For a right-facing character,
+screen-right is the forward/enemy side and screen-left is the rear side.
+"Far plane" means deeper into the picture while remaining in the forward attack
+zone; "near plane" means toward the viewer while remaining in that same forward
+zone. Never substitute screen-left/screen-right for far-plane/near-plane motion.
+Require the character to keep facing the enemy and forbid the blade, contact,
+and trail from crossing behind the spine.
+
+For sword actions, specify one blade, joined hands when appropriate, one contact
+direction, and one arc that trails the blade path. Explicitly forbid a mirrored
+upper/lower pair of arcs, detached effects, extra blades, a second attack, or an
+effect that arrives before the weapon.
 
 ## Effects
 

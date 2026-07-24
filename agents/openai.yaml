@@ -1,4 +1,4 @@
 interface:
   display_name: "Sloth Video to Sprite"
-  short_description: "Turn action videos into synced sprite and sound packs"
-  default_prompt: "Use $sloth-codex-video2sprite-skill to batch-produce reviewed sprite atlases with synchronized sound while keeping media out of context and reusing deterministic processing caches."
+  short_description: "Own the full path from action video to game-ready sprites"
+  default_prompt: "Use $sloth-codex-video2sprite-skill with its local media firewall and paid-pilot gate to turn this character reference into a smooth, fixed-pivot game sprite action and a runnable Godot package."
