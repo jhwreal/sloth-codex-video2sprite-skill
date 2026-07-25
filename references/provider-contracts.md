@@ -5,7 +5,8 @@
 Use the OpenAI Image API for one-shot canonical master generation.
 
 - Default model: `gpt-image-2`.
-- Credential: `OPENAI_API_KEY`.
+- Credential: `OPENAI_API_KEY`, resolved from the environment first and then
+  the fixed private store documented in `configuration.md`.
 - Default endpoint: `POST /v1/images/generations`.
 - The API returns Base64 image data. Decode it inside the worker and discard the encoded string before emitting any status.
 - GPT Image 2 does not support transparent backgrounds. Generate on a flat
@@ -37,7 +38,9 @@ Default base URL:
 https://ark.cn-beijing.volces.com/api/v3
 ```
 
-Credential: `ARK_API_KEY`.
+Credential: `ARK_API_KEY`, resolved from the environment first and then the
+fixed private store documented in `configuration.md`. `SEEDANCE_API_KEY` is a
+legacy Ark alias.
 
 Send:
 

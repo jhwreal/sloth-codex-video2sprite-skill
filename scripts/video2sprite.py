@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import importlib.util
 import io
@@ -28,6 +29,8 @@ from _v2s_common import (
     candidate_processing_fingerprint,
     candidate_dir,
     copy_file_atomic,
+    credential_source,
+    credential_value,
     emit,
     ensure_runtime_outside_skill,
     fingerprint,
@@ -40,6 +43,7 @@ from _v2s_common import (
     safe_identifier,
     sanitize,
     sha256_file,
+    store_private_credential,
     strip_url_query,
     utc_now,
 )
@@ -446,6 +450,8 @@ def command_doctor(_args: argparse.Namespace) -> Dict[str, Any]:
     }
     image = resolve_image_settings()
     video = resolve_video_settings()
+    openai_source = credential_source("OPENAI_API_KEY")
+    ark_source = credential_source("ARK_API_KEY")
     return {
         "status": "ready" if all(dependencies.values()) else "missing_dependencies",
         "python": {
@@ -454,8 +460,10 @@ def command_doctor(_args: argparse.Namespace) -> Dict[str, Any]:
         },
         "dependencies": dependencies,
         "credentials": {
-            "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
-            "ark_configured": bool(os.getenv("ARK_API_KEY")),
+            "openai_configured": bool(credential_value("OPENAI_API_KEY")),
+            "openai_source": openai_source,
+            "ark_configured": bool(credential_value("ARK_API_KEY")),
+            "ark_source": ark_source,
         },
         "defaults": {
             "image": {
@@ -523,6 +531,40 @@ def command_models(_args: argparse.Namespace) -> Dict[str, Any]:
         "image_models": image_models,
         "video_models": video_models,
         "note": "Presets do not guarantee account entitlement; full model IDs are accepted.",
+    }
+
+
+def command_configure_key(args: argparse.Namespace) -> Dict[str, Any]:
+    credential_name = {
+        "ark": "ARK_API_KEY",
+        "openai": "OPENAI_API_KEY",
+    }[args.name]
+    if args.from_env:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", args.from_env):
+            raise Video2SpriteError("Credential environment variable name is invalid")
+        value = os.getenv(args.from_env)
+        if not value:
+            raise Video2SpriteError(
+                f"Credential environment variable is empty or missing: {args.from_env}"
+            )
+        source = "environment"
+    else:
+        if not sys.stdin.isatty():
+            raise Video2SpriteError(
+                "Interactive key entry requires a terminal; use --from-env VARIABLE"
+            )
+        value = getpass.getpass(f"Enter {credential_name} (input hidden): ")
+        source = "interactive"
+    try:
+        path = store_private_credential(credential_name, value)
+    finally:
+        value = ""
+    return {
+        "credential_name": credential_name,
+        "credential_source": source,
+        "path": str(path),
+        "directory_permissions": "0700",
+        "file_permissions": "0600",
     }
 
 
@@ -2209,6 +2251,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     models = subparsers.add_parser("models", help="List bundled model aliases and effective defaults")
     models.set_defaults(handler=command_models)
+
+    configure_key = subparsers.add_parser(
+        "configure-key",
+        help="Securely save a provider key in the fixed user-level credentials file",
+    )
+    configure_key.add_argument("--name", choices=("ark", "openai"), required=True)
+    configure_key.add_argument(
+        "--from-env",
+        help="Read the key from this environment variable instead of hidden terminal input",
+    )
+    configure_key.set_defaults(handler=command_configure_key)
 
     generate = subparsers.add_parser("generate-master", help="Generate a canonical GPT Image master")
     _add_prompt_group(generate)

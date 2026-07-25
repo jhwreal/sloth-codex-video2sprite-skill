@@ -27,7 +27,23 @@ python scripts/video2sprite.py doctor
 python scripts/video2sprite.py models
 ```
 
-完整流程见 [`SKILL.md`](SKILL.md)。环境变量示例见 [`.env.example`](.env.example)，但程序不会自动读取 `.env`；请通过 shell 或密钥管理器加载，避免凭据进入日志和任务文件。
+完整流程见 [`SKILL.md`](SKILL.md)。本 Skill 唯一默认的持久凭据位置是 `~/.config/sloth-codex-video2sprite/credentials.env`；它位于源码仓库、Codex 安装目录和输出目录之外，不能被 Git 跟踪。环境变量仍然优先。
+
+没有配置 Key 时，用隐藏输入保存：
+
+```bash
+python scripts/video2sprite.py configure-key --name ark
+```
+
+如果 Key 已在本地环境变量中，可安全迁移且不会把值放进命令参数：
+
+```bash
+python scripts/video2sprite.py configure-key \
+  --name ark \
+  --from-env SEEDANCE_API_KEY
+```
+
+`--name openai` 用于 GPT Image。命令自动创建 `700` 目录和 `600` 文件，原子写入、保留另一个供应商的 Key，并且绝不打印 Key。仓库中的 [`.env.example`](.env.example) 仅是空模板；真实值不得写入它。详见 [`references/configuration.md`](references/configuration.md)。
 
 火山任务可直接使用 run 内的规范母图：
 

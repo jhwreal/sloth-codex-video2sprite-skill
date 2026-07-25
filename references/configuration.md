@@ -13,14 +13,53 @@ Do not silently replace an explicitly selected provider or model.
 
 ## Credentials
 
-Use environment variables only:
+Environment variables have the highest credential priority:
 
 ```text
 OPENAI_API_KEY
 ARK_API_KEY
 ```
 
-Never place credentials in a run, `.env` committed to Git, prompt, command output, or approval file. A local uncommitted `.env` may be used by the shell, but the Skill does not parse it automatically.
+For reusable local access across Codex sessions, the Skill also reads this fixed
+user-level file when the corresponding environment variable is absent:
+
+```text
+~/.config/sloth-codex-video2sprite/credentials.env
+```
+
+This is the canonical persistent key location for the Skill. It is outside the
+source repository and installed Skill, so Git cannot track it. The repository
+also ignores `*.env` and `/credentials.env` as defense in depth.
+
+When a key is missing, store it with hidden interactive input:
+
+```bash
+python scripts/video2sprite.py configure-key --name ark
+python scripts/video2sprite.py configure-key --name openai
+```
+
+Or copy it from an existing local environment variable without exposing the
+value in process arguments:
+
+```bash
+python scripts/video2sprite.py configure-key \
+  --name ark \
+  --from-env SEEDANCE_API_KEY
+```
+
+The command intentionally has no raw `--key` argument. It creates the directory
+with mode `700`, writes the file atomically with mode `600`, preserves the other
+provider credential, and prints only bounded metadata. The file may contain
+`OPENAI_API_KEY` and `ARK_API_KEY`; an existing `SEEDANCE_API_KEY` is accepted
+as a read-time compatibility alias for Ark and becomes canonical
+`ARK_API_KEY` when saved through the command. The loader does not execute shell
+syntax, does not modify the process environment, and refuses links or files with
+group/world permissions. `doctor` reports only `environment`, `private_file`, or
+an unconfigured state—never the credential value.
+
+Never place credentials in a run, repository, Skill installation, output
+directory, prompt, command output, approval file, or committed `.env`. The
+private file is machine-local configuration and must remain outside Git.
 
 ## Model and endpoint settings
 

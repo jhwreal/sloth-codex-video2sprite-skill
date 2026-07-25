@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import urllib.error
@@ -23,6 +24,13 @@ PRESETS_PATH = SKILL_DIR / "assets" / "model-presets.json"
 DEFAULT_LOG_MAX_CHARS = 4096
 MAX_SAFE_STRING = 1024
 PROCESSOR_SCHEMA_VERSION = 5
+PRIVATE_CREDENTIALS_PATH = (
+    Path.home() / ".config" / "sloth-codex-video2sprite" / "credentials.env"
+)
+PRIVATE_CREDENTIAL_NAMES = frozenset(
+    {"OPENAI_API_KEY", "ARK_API_KEY", "SEEDANCE_API_KEY"}
+)
+MAX_PRIVATE_CREDENTIALS_BYTES = 16 * 1024
 MEDIA_KEY_FRAGMENTS = (
     "b64",
     "base64",
@@ -42,6 +50,157 @@ BEARER_PATTERN = re.compile(
 
 class Video2SpriteError(RuntimeError):
     """Expected user-facing error."""
+
+
+def private_credentials_path() -> Path:
+    """Return the fixed user-level credentials path without creating it."""
+    return PRIVATE_CREDENTIALS_PATH
+
+
+def load_private_credentials(path: Optional[Path] = None) -> Dict[str, str]:
+    """Read a small, permission-locked dotenv file without mutating the environment."""
+    resolved = (path or private_credentials_path()).expanduser()
+    try:
+        metadata = resolved.lstat()
+    except FileNotFoundError:
+        return {}
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise Video2SpriteError(
+            f"Private credentials path must be a regular file, not a link: {resolved}"
+        )
+    if os.name == "posix" and metadata.st_mode & 0o077:
+        raise Video2SpriteError(
+            f"Private credentials file permissions are too broad; run chmod 600 {resolved}"
+        )
+    if metadata.st_size > MAX_PRIVATE_CREDENTIALS_BYTES:
+        raise Video2SpriteError(
+            f"Private credentials file exceeds {MAX_PRIVATE_CREDENTIALS_BYTES} bytes"
+        )
+    try:
+        text = resolved.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise Video2SpriteError(
+            f"Private credentials file is not valid UTF-8: {resolved}"
+        ) from exc
+
+    credentials: Dict[str, str] = {}
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            raise Video2SpriteError(
+                f"Invalid private credentials entry on line {line_number}"
+            )
+        name, value = line.split("=", 1)
+        name = name.strip()
+        if name not in PRIVATE_CREDENTIAL_NAMES:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        if value:
+            credentials[name] = value
+    return credentials
+
+
+def store_private_credential(
+    name: str,
+    value: str,
+    *,
+    path: Optional[Path] = None,
+) -> Path:
+    """Securely create or update one canonical user-level credential."""
+    if name not in {"OPENAI_API_KEY", "ARK_API_KEY"}:
+        raise Video2SpriteError(f"Unsupported credential name: {name}")
+    normalized = value.strip()
+    if not normalized:
+        raise Video2SpriteError(f"Credential value is empty: {name}")
+    if "\n" in normalized or "\r" in normalized:
+        raise Video2SpriteError(f"Credential value must be one line: {name}")
+
+    resolved = (path or private_credentials_path()).expanduser()
+    directory = resolved.parent
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory_metadata = directory.lstat()
+    if stat.S_ISLNK(directory_metadata.st_mode) or not stat.S_ISDIR(
+        directory_metadata.st_mode
+    ):
+        raise Video2SpriteError(
+            f"Private credentials directory must be a regular directory, not a link: {directory}"
+        )
+    if os.name == "posix":
+        directory.chmod(0o700)
+
+    credentials = load_private_credentials(resolved)
+    credentials[name] = normalized
+    if name == "ARK_API_KEY":
+        credentials.pop("SEEDANCE_API_KEY", None)
+    lines = [
+        f"{candidate}={credentials[candidate]}"
+        for candidate in ("OPENAI_API_KEY", "ARK_API_KEY", "SEEDANCE_API_KEY")
+        if credentials.get(candidate)
+    ]
+    encoded = ("\n".join(lines) + "\n").encode("utf-8")
+    if len(encoded) > MAX_PRIVATE_CREDENTIALS_BYTES:
+        raise Video2SpriteError(
+            f"Private credentials file exceeds {MAX_PRIVATE_CREDENTIALS_BYTES} bytes"
+        )
+
+    handle, raw_temp = tempfile.mkstemp(
+        prefix=f".{resolved.name}.",
+        suffix=".tmp",
+        dir=str(directory),
+    )
+    temp_path = Path(raw_temp)
+    try:
+        if os.name == "posix":
+            os.fchmod(handle, 0o600)
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(str(temp_path), str(resolved))
+        if os.name == "posix":
+            resolved.chmod(0o600)
+    finally:
+        normalized = ""
+        encoded = b""
+        if temp_path.exists():
+            temp_path.unlink()
+    return resolved
+
+
+def credential_value(name: str, *, path: Optional[Path] = None) -> Optional[str]:
+    """Resolve a credential with environment variables taking precedence."""
+    if name not in {"OPENAI_API_KEY", "ARK_API_KEY"}:
+        raise Video2SpriteError(f"Unsupported credential name: {name}")
+    names = (name, "SEEDANCE_API_KEY") if name == "ARK_API_KEY" else (name,)
+    for candidate in names:
+        value = os.getenv(candidate)
+        if value:
+            return value
+    private = load_private_credentials(path)
+    for candidate in names:
+        value = private.get(candidate)
+        if value:
+            return value
+    return None
+
+
+def credential_source(name: str, *, path: Optional[Path] = None) -> Optional[str]:
+    """Report only where a credential came from, never its value."""
+    if name not in {"OPENAI_API_KEY", "ARK_API_KEY"}:
+        raise Video2SpriteError(f"Unsupported credential name: {name}")
+    names = (name, "SEEDANCE_API_KEY") if name == "ARK_API_KEY" else (name,)
+    if any(os.getenv(candidate) for candidate in names):
+        return "environment"
+    private = load_private_credentials(path)
+    if any(private.get(candidate) for candidate in names):
+        return "private_file"
+    return None
 
 
 def utc_now() -> str:

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
@@ -13,6 +12,7 @@ from _v2s_common import (
     Video2SpriteError,
     atomic_write_bytes,
     choose_video_url,
+    credential_value,
     download_file,
     find_first_key,
     http_json,
@@ -46,7 +46,7 @@ def generate_openai_master(
     output_format: str = "png",
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
-    key = api_key or os.getenv("OPENAI_API_KEY")
+    key = api_key or credential_value("OPENAI_API_KEY")
     if not key:
         raise Video2SpriteError("OPENAI_API_KEY is required for GPT Image generation")
     request_body = {
@@ -207,7 +207,7 @@ def submit_ark_video(
     watermark: bool,
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
-    key = api_key or os.getenv("ARK_API_KEY")
+    key = api_key or credential_value("ARK_API_KEY")
     if not key:
         raise Video2SpriteError("ARK_API_KEY is required for Volcengine video generation")
     reference_payload, reference_summary = _ark_reference_payload(
@@ -268,7 +268,7 @@ def poll_ark_video(
     task_id: str,
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
-    key = api_key or os.getenv("ARK_API_KEY")
+    key = api_key or credential_value("ARK_API_KEY")
     if not key:
         raise Video2SpriteError("ARK_API_KEY is required for Volcengine video polling")
     response, headers = http_json(

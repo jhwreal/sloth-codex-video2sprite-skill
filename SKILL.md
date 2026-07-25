@@ -36,6 +36,32 @@ SKILL_DIR="${CODEX_HOME:-$HOME/.codex}/skills/sloth-codex-video2sprite-skill"
 python3 "$SKILL_DIR/scripts/video2sprite.py" doctor
 ```
 
+The one canonical persistent key store is
+`~/.config/sloth-codex-video2sprite/credentials.env`. It is machine-local,
+outside both the source repository and installed Skill, and must never be
+tracked by Git. Environment variables still take priority. When `doctor` shows
+a missing provider key, save it through the bounded CLI instead of writing a
+repository `.env`:
+
+```bash
+# Hidden interactive entry in a user-controlled terminal:
+python3 "$SKILL_DIR/scripts/video2sprite.py" configure-key --name ark
+
+# Or copy from an already-set environment variable without putting the value on argv:
+python3 "$SKILL_DIR/scripts/video2sprite.py" configure-key \
+  --name ark \
+  --from-env SEEDANCE_API_KEY
+```
+
+Use `--name openai` for GPT Image. The command creates the parent directory as
+`700`, writes the file atomically as `600`, preserves the other provider key,
+and never prints the value. It deliberately has no raw `--key` argument. If a
+user has not configured a key, ask them to enter it through the hidden prompt or
+make it available through a local environment variable; do not ask them to
+paste a credential into the Codex conversation. Once securely supplied, store
+it at this fixed path by default so later Codex sessions do not depend on
+conversation context.
+
 Read only the reference needed for the current step:
 
 - `references/configuration.md`: environment variables, precedence, model selection, and credentials.
@@ -217,7 +243,11 @@ Package only candidates whose QC is not `fail` and whose approval decision is `a
 - Use `status --compact` or one bounded `advance` summary for orchestration. Never inspect a media task through `read_thread`, `view_image`, screenshots, or media-bearing subagent messages.
 - Compare models with identical prompt, reference, duration, resolution, and seed when the provider supports a seed.
 - Measure generation time, objective QC, the user's use/redo decision, retry count, and any returned usage. Select the default only after a real pilot.
-- Keep secrets in environment variables. Never ask the user to paste API keys into prompts or commit them to files.
+- Keep secrets in environment variables or the permission-locked user-level
+  file at `~/.config/sloth-codex-video2sprite/credentials.env`, as documented
+  in `references/configuration.md`. Environment variables take priority. Never
+  ask the user to paste API keys into prompts or place credentials in a
+  repository, Skill installation, run, or output.
 
 ## Acceptance criteria
 
