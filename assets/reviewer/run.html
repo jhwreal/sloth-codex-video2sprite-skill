@@ -8,11 +8,13 @@
     :root { color-scheme: dark; font: 15px/1.45 system-ui, sans-serif; background: #090d16; color: #edf2ff; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; }
-    header { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-bottom: 1px solid #28334b; background: #101728; }
+    header { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: auto 145px minmax(0, 1fr); align-items: center; gap: 42px; min-height: 52px; padding: 8px 14px; border-bottom: 1px solid #28334b; background: #101728; }
+    .header-actions { display: flex; gap: 8px; margin-right: 78px; }
     button { font: inherit; }
     header button { border: 1px solid #3a4967; border-radius: 7px; padding: 7px 10px; color: #edf2ff; background: #202c44; cursor: pointer; }
     header button:disabled { opacity: .4; cursor: default; }
-    #counter { margin-left: auto; color: #aeb9cd; font-variant-numeric: tabular-nums; }
+    #counter { padding: 6px 10px; border: 1px solid #6382b4; border-radius: 7px; color: #f5f8ff; background: #23314c; box-shadow: 0 0 0 1px rgb(138 180 255 / 12%) inset; text-align: center; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .15px; white-space: nowrap; }
+    #title { min-width: 0; overflow: hidden; color: #edf2ff; font-size: 16px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
     main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, 34vw); min-height: calc(100vh - 52px); }
     #frames { align-content: start; display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; padding: 14px; overflow: auto; }
     .frame { margin: 0; min-width: 0; border: 1px solid #28334b; border-radius: 9px; overflow: hidden; background: #121a2b; cursor: pointer; }
@@ -37,6 +39,9 @@
     #selected-frame { flex: 1; min-height: 0; border: 1px solid #28334b; border-radius: 10px; }
     #message { color: #ffd27b; }
     @media (max-width: 820px) {
+      header { grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; }
+      .header-actions { margin-right: 0; }
+      #title { grid-column: 1 / -1; }
       main { grid-template-columns: 1fr; }
       aside { position: static; height: auto; overflow: visible; border-left: 0; border-top: 1px solid #28334b; }
       #frames { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
@@ -46,14 +51,16 @@
 </head>
 <body>
   <header>
-    <button id="prev">← 上一个</button>
-    <button id="next">下一个 →</button>
-    <span id="counter">加载中…</span>
+    <div class="header-actions">
+      <button id="prev">← 上一个</button>
+      <button id="next">下一个 →</button>
+    </div>
+    <span id="counter" aria-label="当前 Sprite 和总 Sprite 数">加载中…</span>
+    <h1 id="title">动作资产工作台</h1>
   </header>
   <main>
     <section id="frames" aria-label="全部关键帧"></section>
     <aside>
-      <h1 id="title">动作资产工作台</h1>
       <section class="viewer-panel video-panel" aria-labelledby="video-heading">
         <div class="viewer-heading"><h2 id="video-heading">动作播放</h2><span id="timing"></span></div>
         <video id="preview" controls loop playsinline></video>
@@ -159,8 +166,10 @@
       const entry = state.entries[state.index];
       if (!entry) return;
       const token = ++state.renderToken;
-      byId("counter").textContent = `${state.index + 1}/${state.entries.length}`;
-      byId("title").textContent = `${entry.action_id} · ${entry.candidate_id}`;
+      byId("counter").textContent = `第 ${state.index + 1} 个 / 共 ${state.entries.length} 个`;
+      const spriteName = `${entry.action_id} · ${entry.candidate_id}`;
+      byId("title").textContent = spriteName;
+      byId("title").title = spriteName;
       setVideo(entry.paths?.preview);
       byId("prev").disabled = state.index === 0;
       byId("next").disabled = state.index === state.entries.length - 1;

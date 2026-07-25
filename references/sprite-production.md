@@ -126,8 +126,10 @@ atlas geometry, hashes, and event timing.
 The localhost workbench shows all extracted frames on the left, the action video
 at the upper right, and an enlarged selected frame at the lower right. Click a
 thumbnail or use the left and right arrow keys to step through adjacent frames.
-Keyboard selection remains focused and scrolls into view. It is an observation
-surface, not a rating form. The user communicates “use this” or “redo” in the
+Keyboard selection remains focused and scrolls into view. The header shows the
+current Sprite number, total Sprite count, action name, and candidate name so
+captured review evidence remains attributable. It is an observation surface,
+not a rating form. The user communicates “use this” or “redo” in the
 conversation; numeric scoring is not part of the normal path.
 
 Package only a chosen production-profile candidate. Import it with nearest

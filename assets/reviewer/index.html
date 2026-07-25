@@ -8,11 +8,15 @@
     :root { color-scheme: dark; font: 15px/1.45 system-ui, sans-serif; background: #090d16; color: #edf2ff; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; }
-    header { padding: 12px 18px; border-bottom: 1px solid #28334b; background: #101728; }
+    header { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: auto 145px minmax(0, 1fr); align-items: center; gap: 42px; min-height: 52px; padding: 8px 14px; border-bottom: 1px solid #28334b; background: #101728; }
+    .header-actions { display: flex; gap: 8px; margin-right: 78px; }
+    button { font: inherit; }
+    header button { border: 1px solid #3a4967; border-radius: 7px; padding: 7px 10px; color: #edf2ff; background: #202c44; }
+    header button:disabled { opacity: .4; cursor: default; }
     h1, h2, p { margin: 0; }
-    h1 { font-size: 19px; }
-    #subtitle { margin-top: 3px; color: #9eabc1; font-size: 13px; }
-    main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 34vw); min-height: calc(100vh - 65px); }
+    #counter { padding: 6px 10px; border: 1px solid #6382b4; border-radius: 7px; color: #f5f8ff; background: #23314c; box-shadow: 0 0 0 1px rgb(138 180 255 / 12%) inset; text-align: center; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .15px; white-space: nowrap; }
+    #title { min-width: 0; overflow: hidden; color: #edf2ff; font-size: 16px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+    main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 34vw); min-height: calc(100vh - 52px); }
     #frames { align-content: start; display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; padding: 14px; overflow: auto; }
     .frame { margin: 0; min-width: 0; border: 1px solid #28334b; border-radius: 9px; overflow: hidden; background: #121a2b; cursor: pointer; }
     .frame:hover { border-color: #61789f; }
@@ -23,7 +27,7 @@
       background-size: 20px 20px; background-position: 0 0,0 10px,10px -10px,-10px 0; }
     .frame img { aspect-ratio: 18 / 11; }
     figcaption { display: flex; justify-content: space-between; gap: 8px; padding: 6px 8px; color: #aeb9cd; font-size: 12px; font-variant-numeric: tabular-nums; }
-    aside { position: sticky; top: 0; display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 65px); min-height: 0; padding: 16px; border-left: 1px solid #28334b; background: #101728; overflow: hidden; }
+    aside { position: sticky; top: 52px; display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 52px); min-height: 0; padding: 16px; border-left: 1px solid #28334b; background: #101728; overflow: hidden; }
     aside h2 { margin-bottom: 10px; font-size: 16px; }
     .viewer-panel { display: flex; flex-direction: column; min-height: 0; }
     .video-panel { flex: 0 1 47%; }
@@ -33,6 +37,9 @@
     video { flex: 1; min-height: 0; border-radius: 10px; }
     #selected-frame { flex: 1; min-height: 0; border: 1px solid #28334b; border-radius: 10px; }
     @media (max-width: 820px) {
+      header { grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; }
+      .header-actions { margin-right: 0; }
+      #title { grid-column: 1 / -1; }
       main { grid-template-columns: 1fr; }
       aside { position: static; height: auto; overflow: visible; border-left: 0; border-top: 1px solid #28334b; }
       #frames { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
@@ -41,7 +48,14 @@
   </style>
 </head>
 <body>
-  <header><h1 id="title">动作资产工作台</h1><div id="subtitle">正在加载关键帧…</div></header>
+  <header>
+    <div class="header-actions">
+      <button disabled>← 上一个</button>
+      <button disabled>下一个 →</button>
+    </div>
+    <span id="counter" aria-label="当前 Sprite 和总 Sprite 数">第 1 个 / 共 1 个</span>
+    <h1 id="title">正在加载 Sprite…</h1>
+  </header>
   <main>
     <section id="frames" aria-label="全部关键帧"></section>
     <aside>
@@ -127,8 +141,9 @@
     async function load() {
       const reviewData = await fetch("review-data.json", {cache: "no-store"}).then(response => response.json());
       const manifest = await fetch(reviewData.paths?.manifest || "manifest.json", {cache: "no-store"}).then(response => response.json());
-      byId("title").textContent = reviewData.action_id;
-      byId("subtitle").textContent = `${reviewData.candidate_id} · ${reviewData.model_id}`;
+      const spriteName = `${reviewData.action_id} · ${reviewData.candidate_id}`;
+      byId("title").textContent = spriteName;
+      byId("title").title = spriteName;
       byId("preview").src = safePath(reviewData.paths?.preview);
       byId("timing").textContent = `${manifest.frame_count} 帧 · ${manifest.fps} fps · ${manifest.duration_seconds}s`;
       renderFrames(manifest);
@@ -141,7 +156,7 @@
       event.preventDefault();
       moveSelectedFrame(event.key === "ArrowLeft" ? -1 : 1);
     });
-    load().catch(error => { byId("subtitle").textContent = error.message; });
+    load().catch(error => { byId("title").textContent = error.message; });
   </script>
 </body>
 </html>

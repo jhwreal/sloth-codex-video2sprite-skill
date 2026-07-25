@@ -354,6 +354,24 @@ class OfflineEndToEndTests(unittest.TestCase):
         reviewer_html = (self.run_dir / "review.html").read_text(encoding="utf-8")
         self.assertIn("全部关键帧", reviewer_html)
         self.assertIn('id="selected-frame"', reviewer_html)
+        self.assertIn(
+            'id="counter" aria-label="当前 Sprite 和总 Sprite 数"',
+            reviewer_html,
+        )
+        self.assertIn('id="title">动作资产工作台</h1>', reviewer_html)
+        self.assertLess(
+            reviewer_html.index('id="counter"'),
+            reviewer_html.index("<main>"),
+        )
+        self.assertLess(
+            reviewer_html.index('id="title"'),
+            reviewer_html.index("<main>"),
+        )
+        self.assertIn(
+            "`第 ${state.index + 1} 个 / 共 ${state.entries.length} 个`",
+            reviewer_html,
+        )
+        self.assertNotIn('<aside>\n      <h1 id="title">', reviewer_html)
         self.assertIn("selectFrame(frame, manifestPath, figure)", reviewer_html)
         self.assertIn('event.key === "ArrowLeft"', reviewer_html)
         self.assertIn('"ArrowRight"', reviewer_html)
