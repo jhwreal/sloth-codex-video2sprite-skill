@@ -58,6 +58,8 @@
   <script>
     const byId = id => document.getElementById(id);
     const safePath = value => value ? encodeURI(value) : "";
+    const frames = [];
+    let selectedFrameIndex = -1;
     let selectedFigure;
 
     function selectFrame(frame, figure) {
@@ -66,6 +68,7 @@
         selectedFigure.setAttribute("aria-selected", "false");
       }
       selectedFigure = figure;
+      selectedFrameIndex = Number(figure.dataset.framePosition);
       figure.classList.add("selected");
       figure.setAttribute("aria-selected", "true");
       const index = Number(frame.index) + 1;
@@ -75,13 +78,25 @@
       byId("selected-label").textContent = `#${String(index).padStart(2, "0")} · ${time.toFixed(3)}s`;
     }
 
+    function moveSelectedFrame(delta) {
+      if (!frames.length) return;
+      const nextIndex = Math.max(0, Math.min(frames.length - 1, selectedFrameIndex + delta));
+      const next = frames[nextIndex];
+      selectFrame(next.frame, next.figure);
+      next.figure.focus({preventScroll: true});
+      next.figure.scrollIntoView({block: "nearest", inline: "nearest"});
+    }
+
     function renderFrames(manifest) {
       const container = byId("frames");
       container.replaceChildren();
+      frames.length = 0;
+      selectedFrameIndex = -1;
       selectedFigure = null;
-      for (const frame of manifest.frames || []) {
+      for (const [position, frame] of (manifest.frames || []).entries()) {
         const figure = document.createElement("figure");
         figure.className = "frame";
+        figure.dataset.framePosition = String(position);
         figure.tabIndex = 0;
         figure.setAttribute("role", "button");
         figure.setAttribute("aria-selected", "false");
@@ -104,6 +119,7 @@
           }
         };
         container.appendChild(figure);
+        frames.push({frame, figure});
         if (!selectedFigure) selectFrame(frame, figure);
       }
     }
@@ -117,6 +133,14 @@
       byId("timing").textContent = `${manifest.frame_count} 帧 · ${manifest.fps} fps · ${manifest.duration_seconds}s`;
       renderFrames(manifest);
     }
+    document.addEventListener("keydown", event => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const tag = event.target?.tagName?.toLowerCase();
+      if (["input", "textarea", "select", "button", "video"].includes(tag)) return;
+      event.preventDefault();
+      moveSelectedFrame(event.key === "ArrowLeft" ? -1 : 1);
+    });
     load().catch(error => { byId("subtitle").textContent = error.message; });
   </script>
 </body>

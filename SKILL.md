@@ -201,12 +201,14 @@ python "$SKILL_DIR/scripts/video2sprite.py" review \
 
 The localhost workbench puts all extracted frames on the large left pane, keeps
 the processed action video playing at the upper right, and shows one enlarged
-still at the lower right. Clicking a left-side frame updates only the still
-viewer, so the video can continue playing for motion comparison. The workbench
-is intentionally observation-only: it has no score, note, approve, or redo
-controls. Give its URL to the user, receive the user's “use this” or “redo”
-decision in the conversation, then record that explicit decision locally before
-packaging. Add `--action-id` and `--candidate` only when isolating one candidate.
+still at the lower right. Clicking a left-side frame or pressing the left and
+right arrow keys updates only the still viewer, so the video can continue
+playing for motion comparison. Keyboard selection stays focused and scrolls
+into view. The workbench is intentionally observation-only: it has no score,
+note, approve, or redo controls. Give its URL to the user, receive the user's
+“use this” or “redo” decision in the conversation, then record that explicit
+decision locally before packaging. Add `--action-id` and `--candidate` only when
+isolating one candidate.
 
 When deliberately evaluating several providers, optional legacy score metadata
 may still be aggregated without opening media:

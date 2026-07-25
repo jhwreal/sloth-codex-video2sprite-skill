@@ -66,7 +66,14 @@
     </aside>
   </main>
   <script>
-    const state = {entries: [], index: 0, renderToken: 0, selectedFigure: null};
+    const state = {
+      entries: [],
+      index: 0,
+      renderToken: 0,
+      frames: [],
+      selectedFrameIndex: -1,
+      selectedFigure: null
+    };
     const byId = id => document.getElementById(id);
     const safePath = value => value ? encodeURI(value) : "";
 
@@ -89,6 +96,7 @@
         state.selectedFigure.setAttribute("aria-selected", "false");
       }
       state.selectedFigure = figure;
+      state.selectedFrameIndex = Number(figure.dataset.framePosition);
       figure.classList.add("selected");
       figure.setAttribute("aria-selected", "true");
       const index = Number(frame.index) + 1;
@@ -98,13 +106,28 @@
       byId("selected-label").textContent = `#${String(index).padStart(2, "0")} · ${time.toFixed(3)}s`;
     }
 
+    function moveSelectedFrame(delta) {
+      if (!state.frames.length) return;
+      const nextIndex = Math.max(
+        0,
+        Math.min(state.frames.length - 1, state.selectedFrameIndex + delta)
+      );
+      const next = state.frames[nextIndex];
+      selectFrame(next.frame, next.manifestPath, next.figure);
+      next.figure.focus({preventScroll: true});
+      next.figure.scrollIntoView({block: "nearest", inline: "nearest"});
+    }
+
     function renderFrames(manifest, manifestPath) {
       const container = byId("frames");
       container.replaceChildren();
+      state.frames = [];
+      state.selectedFrameIndex = -1;
       state.selectedFigure = null;
-      for (const frame of manifest.frames || []) {
+      for (const [position, frame] of (manifest.frames || []).entries()) {
         const figure = document.createElement("figure");
         figure.className = "frame";
+        figure.dataset.framePosition = String(position);
         figure.tabIndex = 0;
         figure.setAttribute("role", "button");
         figure.setAttribute("aria-selected", "false");
@@ -127,6 +150,7 @@
           }
         };
         container.appendChild(figure);
+        state.frames.push({frame, manifestPath, figure});
         if (!state.selectedFigure) selectFrame(frame, manifestPath, figure);
       }
     }
@@ -162,6 +186,14 @@
 
     byId("prev").onclick = () => move(-1);
     byId("next").onclick = () => move(1);
+    document.addEventListener("keydown", event => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const tag = event.target?.tagName?.toLowerCase();
+      if (["input", "textarea", "select", "button", "video"].includes(tag)) return;
+      event.preventDefault();
+      moveSelectedFrame(event.key === "ArrowLeft" ? -1 : 1);
+    });
     fetch("review-queue.json", {cache: "no-store"}).then(response => response.json()).then(queue => {
       state.entries = queue.entries || [];
       if (!state.entries.length) throw new Error("没有可看的动作候选");

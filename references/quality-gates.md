@@ -43,10 +43,11 @@ Review:
 
 Use the localhost workbench: all extracted frames fill the left pane, the
 processed action video stays at the upper right, and clicking any frame updates
-an enlarged still at the lower right. The page has no scoring, note, approve, or
-redo controls. The user communicates “use this” or “redo” in the conversation;
-record that explicit decision locally. A short rejection reason is useful but
-optional.
+an enlarged still at the lower right. Use the left and right arrow keys to step
+through adjacent frames; the selected thumbnail stays focused and scrolls into
+view. The page has no scoring, note, approve, or redo controls. The user
+communicates “use this” or “redo” in the conversation; record that explicit
+decision locally. A short rejection reason is useful but optional.
 
 Draft-profile review may be used to reject or select a direction, but it is not
 a final delivery gate. Rebuild the selected candidate with the production
