@@ -16,6 +16,7 @@ run/
             └── seedance-2.0/
                 ├── candidate.json
                 ├── source.mp4
+                ├── source.receipt.json  # required only for LibTV origin
                 ├── frames/
                 ├── atlas.png
                 ├── sfx.ogg
@@ -71,6 +72,9 @@ not return to idle; early combo termination uses a separate recovery branch.
 - a sanitized URL/asset reference or canonical local path, never inline media;
 - task ID and bounded status;
 - local source path and SHA-256;
+- explicit source origin (`local`, `provider`, or `libtv`);
+- for LibTV, a bounded `source.receipt.json` hash and summary proving both
+  mandatory download flags, artifact identity, and declared reference ancestry;
 - timestamps and state transitions;
 - whether the run-level paid-pilot gate was explicitly overridden;
 - no raw provider payload.
@@ -87,15 +91,24 @@ not return to idle; early combo termination uses a separate recovery branch.
 
 Manifest provenance includes a processing fingerprint and processing profile.
 The fingerprint covers the source, master, action semantics, output geometry,
-atlas columns, profile, and processor schema. A matching fingerprint plus the
-required files is a reusable processing cache entry.
+atlas columns, profile, processor schema, source origin, and LibTV receipt hash
+when present. A matching fingerprint plus the required files is a reusable
+processing cache entry.
 
 ## Approval
 
 `approval.json` contains the user's use/redo decision, optional note, timestamp,
 reviewed hashes, and optional edited event markers. Legacy numeric scores remain
 accepted metadata but are not requested by the normal workbench. Changing a
-reviewed source, atlas, audio file, prompt, or model invalidates the decision.
+reviewed source, LibTV receipt, atlas, audio file, prompt, or model invalidates
+the decision. A packaged LibTV action retains `source.receipt.json`.
+
+The LibTV receipt is intentionally not a visual certificate. It binds the exact
+downloaded artifact to the wrapper's simultaneous
+`--without-ai-watermark --vip` invocation and records only hashed upstream
+ancestry. It does not assert that the pixels contain no baked watermark;
+automatic provenance/hash validation and human visual review remain separate
+gates.
 
 The run-level `review-queue.json` contains only bounded metadata and relative
 local media paths. It is rebuilt when the reviewer starts and is never a media

@@ -38,8 +38,10 @@ from _v2s_common import (
     load_presets,
     parse_hex_color,
     parse_size,
+    require_executable,
     resolve_image_settings,
     resolve_video_settings,
+    run_command,
     safe_identifier,
     sanitize,
     sha256_file,
@@ -48,6 +50,15 @@ from _v2s_common import (
     utc_now,
 )
 from _v2s_media import probe_media, process_candidate_media
+from _v2s_receipts import (
+    LIBTV_RECEIPT_FILENAME,
+    LIBTV_REFERENCE_AUDIT_MODES,
+    libtv_receipt_sidecar_path,
+    validate_candidate_source,
+    validate_libtv_receipt,
+    validate_libtv_reference_ancestors,
+    write_libtv_receipt,
+)
 from _v2s_providers import (
     download_provider_video,
     generate_openai_master,
@@ -71,6 +82,9 @@ ARK_RATIOS = ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive")
 KEY_MODES = ("border", "global")
 PLACEMENT_MODES = ("fixed", "fit-union")
 RESAMPLING_MODES = ("nearest", "lanczos")
+LIBTV_MEDIA_SUFFIXES = frozenset(
+    {".mp4", ".mov", ".m4v", ".webm", ".png", ".jpg", ".jpeg", ".webp"}
+)
 
 
 def _runtime_dir(raw: str) -> Path:
@@ -863,6 +877,19 @@ def command_attach_video(args: argparse.Namespace) -> Dict[str, Any]:
     source = Path(args.video).expanduser().resolve()
     if not source.is_file():
         raise Video2SpriteError(f"Video does not exist: {source}")
+    source_origin = str(args.source_origin)
+    receipt_summary = None
+    if source_origin == "libtv":
+        if not args.source_receipt:
+            raise Video2SpriteError(
+                "A LibTV source requires --source-receipt from libtv-download"
+            )
+        receipt_summary = validate_libtv_receipt(
+            Path(args.source_receipt).expanduser().resolve(),
+            source,
+        )
+    elif args.source_receipt:
+        raise Video2SpriteError("--source-receipt is valid only with --source-origin libtv")
     source_probe = probe_media(
         source, ffprobe=os.getenv("VIDEO2SPRITE_FFPROBE", "ffprobe")
     )
@@ -871,15 +898,56 @@ def command_attach_video(args: argparse.Namespace) -> Dict[str, Any]:
     destination_dir = candidate_dir(run_dir, args.action_id, candidate_id)
     destination_dir.mkdir(parents=True, exist_ok=True)
     destination = destination_dir / "source.mp4"
+    destination_receipt = destination_dir / LIBTV_RECEIPT_FILENAME
+    candidate_path = destination_dir / "candidate.json"
+    existing = load_json(candidate_path) if candidate_path.is_file() else {}
+    existing_source = existing.get("source") or {}
     previous_hash = sha256_file(destination) if destination.is_file() else None
     incoming_hash = sha256_file(source)
-    reused = previous_hash == incoming_hash
+    incoming_receipt_hash = (
+        receipt_summary["receipt_sha256"] if receipt_summary else None
+    )
+    receipt_reused = (
+        destination_receipt.is_file()
+        and receipt_summary is not None
+        and sha256_file(destination_receipt) == incoming_receipt_hash
+    ) if receipt_summary else not destination_receipt.exists()
+    reused = (
+        previous_hash == incoming_hash
+        and existing_source.get("origin") == source_origin
+        and (existing_source.get("receipt") or {}).get("sha256")
+        == incoming_receipt_hash
+        and receipt_reused
+    )
     approval_archived = None
     if not reused:
         approval_archived = _archive_approval(destination_dir / "approval.json")
         copy_file_atomic(source, destination)
-    candidate_path = destination_dir / "candidate.json"
-    existing = load_json(candidate_path) if candidate_path.is_file() else {}
+        if receipt_summary:
+            copy_file_atomic(
+                Path(args.source_receipt).expanduser().resolve(),
+                destination_receipt,
+            )
+        elif destination_receipt.exists():
+            destination_receipt.unlink()
+    source_record: Dict[str, Any] = {
+        "path": "source.mp4",
+        "origin": source_origin,
+        "sha256": sha256_file(destination),
+        "bytes": destination.stat().st_size,
+        "duration_seconds": source_probe["duration_seconds"],
+        "audio_present": source_probe["audio"]["present"],
+    }
+    if receipt_summary:
+        copied_summary = validate_libtv_receipt(destination_receipt, destination)
+        source_record["receipt"] = {
+            "path": LIBTV_RECEIPT_FILENAME,
+            "sha256": copied_summary["receipt_sha256"],
+            "receipt_type": copied_summary["receipt_type"],
+            "required_flags": copied_summary["required_flags"],
+            "proof_scope": copied_summary["proof_scope"],
+            "reference_audit": copied_summary["reference_audit"],
+        }
     candidate = {
         "schema_version": SCHEMA_VERSION,
         "candidate_id": candidate_id,
@@ -890,13 +958,7 @@ def command_attach_video(args: argparse.Namespace) -> Dict[str, Any]:
         "capabilities": existing.get("capabilities")
         or {"native_audio": source_probe["audio"]["present"], "image_to_video": None, "tier": "local"},
         "status": (existing.get("status") or "ready") if reused else "ready",
-        "source": {
-            "path": "source.mp4",
-            "sha256": sha256_file(destination),
-            "bytes": destination.stat().st_size,
-            "duration_seconds": source_probe["duration_seconds"],
-            "audio_present": source_probe["audio"]["present"],
-        },
+        "source": source_record,
         "task_id": existing.get("task_id"),
         "created_at": existing.get("created_at") or utc_now(),
         "updated_at": utc_now(),
@@ -913,10 +975,95 @@ def command_attach_video(args: argparse.Namespace) -> Dict[str, Any]:
         "candidate_id": candidate_id,
         "status": candidate["status"],
         "source_sha256": candidate["source"]["sha256"],
+        "source_origin": source_origin,
+        "source_receipt_sha256": incoming_receipt_hash,
         "duration_seconds": source_probe["duration_seconds"],
         "audio_present": source_probe["audio"]["present"],
         "reused": reused,
         "approval_archived": approval_archived,
+    }
+
+
+def command_libtv_download(args: argparse.Namespace) -> Dict[str, Any]:
+    """Run the official CLI with both no-watermark VIP flags and receipt it."""
+    if float(args.timeout) < 1.0 or float(args.timeout) > 3600.0:
+        raise Video2SpriteError("LibTV download timeout must be between 1 and 3600 seconds")
+    ancestor_sources = [Path(item).expanduser().resolve() for item in args.ancestor_source or []]
+    ancestor_receipts = [Path(item).expanduser().resolve() for item in args.ancestor_receipt or []]
+    ancestors = validate_libtv_reference_ancestors(
+        ancestor_sources,
+        ancestor_receipts,
+    )
+    if args.reference_audit == "no-libtv-ancestors" and ancestors:
+        raise Video2SpriteError(
+            "no-libtv-ancestors forbids ancestor source/receipt pairs"
+        )
+    if args.reference_audit == "verified-libtv-ancestors" and not ancestors:
+        raise Video2SpriteError(
+            "verified-libtv-ancestors requires at least one ancestor source/receipt pair"
+        )
+    output_dir = _runtime_dir(args.output_dir)
+    if output_dir.exists():
+        if not output_dir.is_dir():
+            raise Video2SpriteError("LibTV output path must be a directory")
+        if any(output_dir.iterdir()):
+            raise Video2SpriteError(
+                "LibTV output directory must be new or empty for one bounded artifact"
+            )
+    else:
+        output_dir.mkdir(parents=True)
+    executable = require_executable(args.libtv or os.getenv("LIBTV_BIN", "libtv"))
+    version_result = run_command([executable, "--version"], timeout=30.0)
+    command = [
+        executable,
+        "download",
+        "-n",
+        str(args.node),
+        "-o",
+        str(output_dir),
+    ]
+    if args.project:
+        command.extend(["-p", str(args.project)])
+    if args.group:
+        command.extend(["-g", str(args.group)])
+    command.extend(["--without-ai-watermark", "--vip"])
+    run_command(command, timeout=float(args.timeout))
+    artifacts = sorted(
+        path
+        for path in output_dir.rglob("*")
+        if path.is_file()
+        and not path.is_symlink()
+        and path.suffix.lower() in LIBTV_MEDIA_SUFFIXES
+    )
+    if len(artifacts) != 1:
+        raise Video2SpriteError(
+            "LibTV download must produce exactly one supported image or video artifact"
+        )
+    artifact = artifacts[0]
+    receipt_path = libtv_receipt_sidecar_path(artifact)
+    summary = write_libtv_receipt(
+        artifact,
+        receipt_path,
+        libtv_version=str(version_result.stdout),
+        node=str(args.node),
+        project=str(args.project) if args.project else None,
+        group=str(args.group) if args.group else None,
+        reference_audit=str(args.reference_audit),
+        reference_ancestors=ancestors,
+    )
+    return {
+        "output_dir": str(output_dir),
+        "artifact": str(artifact.resolve()),
+        "receipt": str(receipt_path.resolve()),
+        "artifact_sha256": summary["artifact_sha256"],
+        "artifact_bytes": summary["artifact_bytes"],
+        "artifact_kind": (
+            "video" if artifact.suffix.lower() in {".mp4", ".mov", ".m4v", ".webm"} else "image"
+        ),
+        "libtv_version": summary["libtv_version"],
+        "required_flags": summary["required_flags"],
+        "proof_scope": summary["proof_scope"],
+        "reference_audit": summary["reference_audit"],
     }
 
 
@@ -1131,6 +1278,7 @@ def command_poll(args: argparse.Namespace) -> Dict[str, Any]:
         )
         candidate["source"] = {
             "path": "source.mp4",
+            "origin": "provider",
             "sha256": downloaded["sha256"],
             "bytes": downloaded["bytes"],
             "source_url": downloaded["source_url"],
@@ -1242,6 +1390,11 @@ def _processed_cache_result(
         "qc": sha256_file(path / "qc.json"),
         "preview": actual_preview_hash,
     }
+    if (candidate.get("source") or {}).get("origin") == "libtv":
+        receipt_path = path / LIBTV_RECEIPT_FILENAME
+        if not receipt_path.is_file():
+            return None
+        reviewed_hashes["source_receipt"] = sha256_file(receipt_path)
     if audio_present:
         reviewed_hashes["audio"] = str((manifest.get("audio") or {})["sha256"])
     approval_state = {"decision": None, "valid": False}
@@ -1296,6 +1449,9 @@ def command_process(args: argparse.Namespace) -> Dict[str, Any]:
             f"Candidate is not ready for local processing: {candidate.get('status')}"
         )
     profile = _processing_profile(args.profile)
+    source_origin = (candidate.get("source") or {}).get("origin")
+    if source_origin is not None:
+        validate_candidate_source(candidate_path.parent, candidate)
     if not args.force:
         cached = _processed_cache_result(
             run_dir=run_dir,
@@ -1317,6 +1473,10 @@ def command_process(args: argparse.Namespace) -> Dict[str, Any]:
                 }
             )
             return cached
+    if source_origin is None:
+        raise Video2SpriteError(
+            "Legacy candidate has no source origin; its existing valid cache may be reused, but rebuilding requires reattaching with --source-origin"
+        )
     stale_approval = _archive_approval(candidate_path.parent / "approval.json")
     candidate["status"] = "processing"
     candidate["updated_at"] = utc_now()
@@ -1715,6 +1875,7 @@ def _approval_state(candidate_path: Path) -> Dict[str, Any]:
         "qc": "qc.json",
         "preview": "preview.mp4",
         "audio": "sfx.ogg",
+        "source_receipt": LIBTV_RECEIPT_FILENAME,
     }
     required_labels = {"source", "atlas", "manifest", "qc", "preview"}
     if (candidate_path / "sfx.ogg").is_file():
@@ -1730,8 +1891,19 @@ def _approval_state(candidate_path: Path) -> Dict[str, Any]:
         manifest = load_json(candidate_path / "manifest.json")
         action = load_json(candidate_path.parents[1] / "action.json")
         candidate = load_json(candidate_path / "candidate.json")
+        source_validation = validate_candidate_source(
+            candidate_path,
+            candidate,
+            allow_legacy=True,
+        )
+        if source_validation["origin"] == "libtv":
+            required_labels.add("source_receipt")
+            valid = valid and "source_receipt" in hashes
         master_path = candidate_path.parents[3] / "master" / "source.png"
         provenance = manifest.get("provenance") or {}
+        manifest_source_origin = (provenance.get("source") or {}).get("origin")
+        if source_validation["origin"] == "legacy" and manifest_source_origin is not None:
+            valid = False
         valid = valid and provenance.get("action_fingerprint") == action_processing_fingerprint(action)
         valid = valid and provenance.get("model_id") == candidate.get("model_id")
         valid = valid and provenance.get("master_sha256") == sha256_file(master_path)
@@ -2050,6 +2222,8 @@ def command_review(args: argparse.Namespace) -> Optional[Dict[str, Any]]:
 
 
 def _verify_approval(candidate_path: Path) -> Dict[str, Any]:
+    candidate = load_json(candidate_path / "candidate.json")
+    validate_candidate_source(candidate_path, candidate, allow_legacy=True)
     qc = load_json(candidate_path / "qc.json")
     approval = load_json(candidate_path / "approval.json")
     manifest = load_json(candidate_path / "manifest.json")
@@ -2182,6 +2356,7 @@ def command_package(args: argparse.Namespace) -> Dict[str, Any]:
             source_dir = candidate_dir(run_dir, str(action_id), candidate_id)
             _verify_approval(source_dir)
             manifest = load_json(source_dir / "manifest.json")
+            candidate = load_json(source_dir / "candidate.json")
             action_output = temp_root / run["character_id"] / str(action_id)
             frames_output = action_output / "frames"
             frames_output.mkdir(parents=True, exist_ok=True)
@@ -2192,6 +2367,11 @@ def command_package(args: argparse.Namespace) -> Dict[str, Any]:
                 copy_file_atomic(source_dir / "frames" / filename, frames_output / filename)
             if (source_dir / "sfx.ogg").is_file():
                 copy_file_atomic(source_dir / "sfx.ogg", action_output / "sfx.ogg")
+            if (candidate.get("source") or {}).get("origin") == "libtv":
+                copy_file_atomic(
+                    source_dir / LIBTV_RECEIPT_FILENAME,
+                    action_output / LIBTV_RECEIPT_FILENAME,
+                )
             if args.engine == "godot":
                 prefix = args.godot_res_prefix.rstrip("/")
                 if args.godot_res_prefix == "res://":
@@ -2217,6 +2397,12 @@ def command_package(args: argparse.Namespace) -> Dict[str, Any]:
                     "model_id": manifest.get("provenance", {}).get("model_id"),
                     "atlas_sha256": sha256_file(action_output / "atlas.png"),
                     "audio": (action_output / "sfx.ogg").is_file(),
+                    "source_origin": (candidate.get("source") or {}).get("origin"),
+                    "source_receipt_sha256": (
+                        sha256_file(action_output / LIBTV_RECEIPT_FILENAME)
+                        if (action_output / LIBTV_RECEIPT_FILENAME).is_file()
+                        else None
+                    ),
                     "frame_count": manifest["frame_count"],
                 }
             )
@@ -2340,11 +2526,52 @@ def _build_parser() -> argparse.ArgumentParser:
     add_action.add_argument("--base-url")
     add_action.set_defaults(handler=command_add_action)
 
+    libtv_download = subparsers.add_parser(
+        "libtv-download",
+        help="Download one LibTV artifact with mandatory watermark-free VIP flags and a receipt",
+    )
+    libtv_download.add_argument("--node", required=True)
+    libtv_download.add_argument("--output-dir", required=True)
+    libtv_download.add_argument("--project")
+    libtv_download.add_argument("--group")
+    libtv_download.add_argument(
+        "--reference-audit",
+        required=True,
+        choices=sorted(LIBTV_REFERENCE_AUDIT_MODES),
+        help="Declare and bind LibTV-origin reference ancestry for the generating node",
+    )
+    libtv_download.add_argument(
+        "--ancestor-source",
+        action="append",
+        help="Local LibTV-origin reference ancestor artifact; pair with --ancestor-receipt",
+    )
+    libtv_download.add_argument(
+        "--ancestor-receipt",
+        action="append",
+        help="Receipt matching the corresponding --ancestor-source",
+    )
+    libtv_download.add_argument(
+        "--libtv",
+        help="Official LibTV CLI executable; defaults to LIBTV_BIN or libtv",
+    )
+    libtv_download.add_argument("--timeout", type=float, default=900.0)
+    libtv_download.set_defaults(handler=command_libtv_download)
+
     attach = subparsers.add_parser("attach-video", help="Attach an existing local candidate video")
     attach.add_argument("--run-dir", required=True)
     attach.add_argument("--action-id", required=True)
     attach.add_argument("--candidate", default="local")
     attach.add_argument("--video", required=True)
+    attach.add_argument(
+        "--source-origin",
+        choices=("local", "libtv"),
+        required=True,
+        help="Declare whether the video is ordinary local media or a LibTV download",
+    )
+    attach.add_argument(
+        "--source-receipt",
+        help="Required bounded receipt for --source-origin libtv",
+    )
     attach.set_defaults(handler=command_attach_video)
 
     submit = subparsers.add_parser("submit", help="Submit an asynchronous image-to-video task")

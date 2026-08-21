@@ -314,20 +314,27 @@ def candidate_processing_fingerprint(
     profile: str,
 ) -> str:
     """Hash all inputs that materially affect deterministic local processing."""
-    return fingerprint(
-        {
-            "processor_schema_version": PROCESSOR_SCHEMA_VERSION,
-            "source_sha256": (candidate.get("source") or {}).get("sha256"),
-            "master_sha256": (run_spec.get("master") or {}).get("sha256"),
-            "action_fingerprint": action_processing_fingerprint(action),
-            "frame_size": run_spec.get("frame_size"),
-            "pivot": run_spec.get("pivot"),
-            "placement": run_spec.get("placement"),
-            "resampling": run_spec.get("resampling"),
-            "columns": columns or action.get("columns"),
-            "profile": profile,
-        }
-    )
+    source = candidate.get("source") or {}
+    payload = {
+        "processor_schema_version": PROCESSOR_SCHEMA_VERSION,
+        "source_sha256": source.get("sha256"),
+        "master_sha256": (run_spec.get("master") or {}).get("sha256"),
+        "action_fingerprint": action_processing_fingerprint(action),
+        "frame_size": run_spec.get("frame_size"),
+        "pivot": run_spec.get("pivot"),
+        "placement": run_spec.get("placement"),
+        "resampling": run_spec.get("resampling"),
+        "columns": columns or action.get("columns"),
+        "profile": profile,
+    }
+    # Preserve the exact legacy fingerprint for already-processed candidates
+    # while binding every newly attached/provider source to explicit provenance.
+    if "origin" in source:
+        payload["source_origin"] = source.get("origin")
+        payload["source_receipt_sha256"] = (source.get("receipt") or {}).get(
+            "sha256"
+        )
+    return fingerprint(payload)
 
 
 def strip_url_query(value: str) -> str:

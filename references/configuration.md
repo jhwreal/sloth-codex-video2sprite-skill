@@ -94,9 +94,13 @@ VIDEO2SPRITE_LOCAL_WORKERS=2
 VIDEO2SPRITE_MAX_CANDIDATES_PER_ACTION=2
 VIDEO2SPRITE_ADVANCE_WAIT_SECONDS=0
 VIDEO2SPRITE_POLL_INTERVAL_SECONDS=10
+LIBTV_BIN=libtv
 ```
 
 The CLI must remain useful without credentials for `doctor`, `models`, `init`, `add-action`, `attach-video`, `process`, `status`, `review`, and `package`.
+`LIBTV_BIN` selects the official LibTV executable for `libtv-download`; the
+wrapper never reads or persists LibTV credentials and always supplies both
+`--without-ai-watermark` and `--vip`.
 
 `VIDEO2SPRITE_PROCESS_PROFILE` accepts `draft` or `production`. Draft keeps the same frame selection, matte removal, geometry, audio extraction, QC, and manifest semantics, but uses faster PNG compression and preview encoding. Packaging rejects draft artifacts.
 

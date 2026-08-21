@@ -63,6 +63,14 @@ Run paid or live-provider tests only after credentials are configured and the us
 - Draft processing is for selection only; packaging requires production processing followed by a current approval.
 - Compare models using the same reference, prompt, duration, resolution, and seed where possible.
 - Require native audio for the default production goal unless the user explicitly accepts a silent model or adds a separate audio provider.
+- Route every LibTV artifact through `libtv-download`; it must always pass
+  `--without-ai-watermark --vip`, issue a bounded receipt, and require an
+  explicit upstream-reference audit. Never classify LibTV output as ordinary
+  local media to bypass the gate.
+- If a LibTV generation reference came from LibTV, require its matching clean
+  artifact/receipt ancestor. Never re-upload frames from unreceipted or visibly
+  watermarked candidates. A receipt proves invocation and file identity only;
+  it cannot replace machine and human visual watermark review.
 
 ## Privacy and release
 

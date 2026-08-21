@@ -21,6 +21,7 @@ from _v2s_common import (
     sha256_file,
     utc_now,
 )
+from _v2s_receipts import LIBTV_RECEIPT_FILENAME, validate_candidate_source
 
 
 MAX_DECISION_BYTES = 64 * 1024
@@ -44,8 +45,21 @@ def write_decision(
         raise Video2SpriteError("Decision must be approved or rejected")
     if len(note) > MAX_NOTE_CHARS:
         raise Video2SpriteError(f"Decision note exceeds {MAX_NOTE_CHARS} characters")
+    candidate = load_json(candidate_dir / "candidate.json")
+    source_validation = validate_candidate_source(
+        candidate_dir,
+        candidate,
+        allow_legacy=True,
+    )
     manifest = load_json(candidate_dir / "manifest.json")
     qc = load_json(candidate_dir / "qc.json")
+    manifest_origin = ((manifest.get("provenance") or {}).get("source") or {}).get(
+        "origin"
+    )
+    if source_validation["origin"] == "legacy" and manifest_origin is not None:
+        raise Video2SpriteError(
+            "Candidate source origin was removed after processing; reattach the source"
+        )
     if manifest.get("action_id") != action_id or manifest.get("candidate_id") != candidate_id:
         raise Video2SpriteError("Review target does not match the processed manifest")
     if decision == "approved" and qc.get("status") == "fail":
@@ -61,6 +75,8 @@ def write_decision(
     audio_path = candidate_dir / "sfx.ogg"
     if audio_path.is_file():
         reviewed_paths["audio"] = audio_path
+    if source_validation["origin"] == "libtv":
+        reviewed_paths["source_receipt"] = candidate_dir / LIBTV_RECEIPT_FILENAME
     hashes: Dict[str, str] = {}
     for label, path in reviewed_paths.items():
         if not path.is_file():

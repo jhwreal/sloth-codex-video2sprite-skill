@@ -266,9 +266,36 @@ class ProcessingFingerprintTests(unittest.TestCase):
             columns=None,
             profile="production",
         )
+        libtv_a = candidate_processing_fingerprint(
+            run,
+            action,
+            {
+                "source": {
+                    "sha256": "video-a",
+                    "origin": "libtv",
+                    "receipt": {"sha256": "receipt-a"},
+                }
+            },
+            columns=None,
+            profile="production",
+        )
+        libtv_b = candidate_processing_fingerprint(
+            run,
+            action,
+            {
+                "source": {
+                    "sha256": "video-a",
+                    "origin": "libtv",
+                    "receipt": {"sha256": "receipt-b"},
+                }
+            },
+            columns=None,
+            profile="production",
+        )
         self.assertNotEqual(production, draft)
         self.assertNotEqual(production, changed_source)
         self.assertNotEqual(production, changed_pivot)
+        self.assertNotEqual(libtv_a, libtv_b)
 
 
 class FixedCanvasGeometryTests(unittest.TestCase):

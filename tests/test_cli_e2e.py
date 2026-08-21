@@ -28,6 +28,7 @@ from _v2s_media import (
     probe_media,
 )
 from review_server import build_review_queue, create_run_server, write_decision
+from _v2s_receipts import write_libtv_receipt
 
 
 class OfflineEndToEndTests(unittest.TestCase):
@@ -113,6 +114,22 @@ class OfflineEndToEndTests(unittest.TestCase):
         self.assertNotIn("bearer ", lowered)
         return json.loads(result.stdout)
 
+    def _cli_failure(self, *args: str) -> Dict[str, Any]:
+        environment = dict(os.environ)
+        environment["VIDEO2SPRITE_LOG_MAX_CHARS"] = "4096"
+        result = subprocess.run(
+            [sys.executable, str(CLI), *args],
+            cwd=str(ROOT),
+            env=environment,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 2, msg=result.stderr)
+        self.assertLessEqual(len(result.stdout), 4097)
+        return json.loads(result.stdout)
+
     def test_offline_run_review_and_godot_package(self) -> None:
         initialized = self._cli(
             "init",
@@ -151,6 +168,14 @@ class OfflineEndToEndTests(unittest.TestCase):
             "2",
             "--audio-required",
         )
+        libtv_receipt = self.root / "source.mp4.libtv-receipt.json"
+        write_libtv_receipt(
+            self.video,
+            libtv_receipt,
+            libtv_version="libtv test-1.0",
+            node="synthetic-node",
+            reference_audit="no-libtv-ancestors",
+        )
         attached = self._cli(
             "attach-video",
             "--run-dir",
@@ -161,6 +186,10 @@ class OfflineEndToEndTests(unittest.TestCase):
             "local",
             "--video",
             str(self.video),
+            "--source-origin",
+            "libtv",
+            "--source-receipt",
+            str(libtv_receipt),
         )
         self.assertTrue(attached["audio_present"])
 
@@ -175,24 +204,51 @@ class OfflineEndToEndTests(unittest.TestCase):
             "local",
         )
         first_process_elapsed = time.perf_counter() - first_process_started
-        self.assertEqual(processed["status"], "pass")
+        self.assertEqual(processed["status"], "review")
         self.assertEqual(processed["frame_count"], 8)
         self.assertFalse(processed["cached"])
 
         candidate = self.run_dir / "actions" / "attack" / "candidates" / "local"
         manifest = json.loads((candidate / "manifest.json").read_text(encoding="utf-8"))
         qc = json.loads((candidate / "qc.json").read_text(encoding="utf-8"))
-        self.assertEqual(qc["status"], "pass")
+        self.assertEqual(qc["status"], "review")
+        self.assertIn(
+            "libtv_visual_watermark_review_required",
+            [issue["code"] for issue in qc["issues"]],
+        )
         self.assertEqual(manifest["frame_count"], 8)
         self.assertTrue((candidate / "atlas.png").is_file())
         self.assertTrue((candidate / "sfx.ogg").is_file())
         self.assertTrue((candidate / "preview.mp4").is_file())
+        self.assertTrue((candidate / "source.receipt.json").is_file())
         x_positions = [frame["alpha_bounds"]["x"] for frame in manifest["frames"]]
         self.assertGreater(max(x_positions) - min(x_positions), 10)
 
         with self.Image.open(candidate / "atlas.png") as atlas:
             self.assertEqual(atlas.mode, "RGBA")
             self.assertLess(atlas.getextrema()[3][0], atlas.getextrema()[3][1])
+
+        copied_receipt = candidate / "source.receipt.json"
+        clean_receipt_bytes = copied_receipt.read_bytes()
+        copied_receipt.write_text("{}", encoding="utf-8")
+        process_failure = self._cli_failure(
+            "process",
+            "--run-dir",
+            str(self.run_dir),
+            "--action-id",
+            "attack",
+            "--candidate",
+            "local",
+        )
+        self.assertIn("LibTV receipt", process_failure["error"])
+        with self.assertRaisesRegex(video2sprite.Video2SpriteError, "LibTV receipt"):
+            write_decision(
+                candidate,
+                action_id="attack",
+                candidate_id="local",
+                decision="approved",
+            )
+        copied_receipt.write_bytes(clean_receipt_bytes)
 
         approval = write_decision(
             candidate,
@@ -209,6 +265,7 @@ class OfflineEndToEndTests(unittest.TestCase):
             },
         )
         self.assertEqual(approval["decision"], "approved")
+        self.assertIn("source_receipt", approval["reviewed_hashes"])
         atlas_mtime = (candidate / "atlas.png").stat().st_mtime_ns
         preview_mtime = (candidate / "preview.mp4").stat().st_mtime_ns
         approval_mtime = (candidate / "approval.json").stat().st_mtime_ns
@@ -256,9 +313,14 @@ class OfflineEndToEndTests(unittest.TestCase):
         action_package = self.package_dir / "test-hero" / "attack"
         self.assertTrue((action_package / "atlas.png").is_file())
         self.assertTrue((action_package / "sfx.ogg").is_file())
+        self.assertTrue((action_package / "source.receipt.json").is_file())
         tres = (action_package / "attack.tres").read_text(encoding="utf-8")
         self.assertIn('path="res://test-hero/attack/atlas.png"', tres)
         self.assertIn('"name": &"attack"', tres)
+        copied_receipt.write_text("{}", encoding="utf-8")
+        with self.assertRaisesRegex(video2sprite.Video2SpriteError, "LibTV receipt"):
+            video2sprite._verify_approval(candidate)
+        copied_receipt.write_bytes(clean_receipt_bytes)
 
         (candidate / "frames" / "frame_0000.png").write_bytes(b"corrupted")
         rebuilt = self._cli(
@@ -300,6 +362,8 @@ class OfflineEndToEndTests(unittest.TestCase):
                 "local",
                 "--video",
                 str(self.video),
+                "--source-origin",
+                "local",
             )
         advanced = self._cli(
             "advance",
@@ -551,6 +615,8 @@ class OfflineEndToEndTests(unittest.TestCase):
             "local",
             "--video",
             str(video),
+            "--source-origin",
+            "local",
         )
         processed = self._cli(
             "process",

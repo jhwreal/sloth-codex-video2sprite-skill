@@ -162,16 +162,52 @@ seconds and emits only one final bounded summary. It never submits or creates a
 billed task. Use the single-candidate `poll` command only for diagnosis.
 
 After the user adopts the pilot, submit the remaining independent actions close
-together and advance the whole run in batches. Alternatively attach existing
-local MP4 files with `attach-video`, then run the same
-`advance --process-ready` command. When an existing candidate comes from a
-LibTV node, download the watermark-free member artifact with both explicit
-flags before attaching it:
+together and advance the whole run in batches. Alternatively attach ordinary
+local MP4 files with an explicit origin, then run the same
+`advance --process-ready` command:
 
 ```bash
-libtv download -n <node> -o <dedicated-output-directory> \
-  --without-ai-watermark --vip
+python "$SKILL_DIR/scripts/video2sprite.py" attach-video \
+  --run-dir /absolute/path/to/video2sprite-run \
+  --action-id attack \
+  --candidate local \
+  --video /absolute/path/to/local.mp4 \
+  --source-origin local
 ```
+
+LibTV media must never enter the Sprite pipeline through a raw `libtv
+download` or a false `local` declaration. Use the Skill wrapper. It always
+passes both `--without-ai-watermark` and `--vip`, accepts exactly one artifact
+in a new/empty output directory, and creates a bounded sidecar receipt:
+
+```bash
+python "$SKILL_DIR/scripts/video2sprite.py" libtv-download \
+  --node <node> \
+  --output-dir /absolute/path/to/empty-download \
+  --reference-audit no-libtv-ancestors
+
+python "$SKILL_DIR/scripts/video2sprite.py" attach-video \
+  --run-dir /absolute/path/to/video2sprite-run \
+  --action-id attack \
+  --candidate libtv-h3 \
+  --video /absolute/path/to/empty-download/member.mp4 \
+  --source-origin libtv \
+  --source-receipt /absolute/path/to/empty-download/member.mp4.libtv-receipt.json
+```
+
+If an image or video reference sent into the generating LibTV node itself came
+from LibTV, every such upstream artifact must already have its own valid
+double-flag receipt. Declare that lineage with
+`--reference-audit verified-libtv-ancestors` and pair each
+`--ancestor-source` with an `--ancestor-receipt`. 不得从无 receipt 或肉眼可见
+水印的 candidate 抽帧后再上传。This lineage audit is mandatory even when the
+final node itself is downloaded correctly.
+
+The receipt is deliberately narrow: receipt 只证明双参数下载调用与本地文件身份，
+不证明画面视觉上必然无内嵌水印。Processing、approval 和 packaging 会重新校验
+source/receipt 哈希；最终仍必须经过机器检查和 localhost 工作台的视觉水印审查。
+`source.receipt.json` is copied into the candidate and any packaged LibTV
+action so the proof remains auditable.
 
 The default budget permits at most two remote candidates per action. Exceed it
 only for a deliberate representative benchmark with `--allow-over-budget`.

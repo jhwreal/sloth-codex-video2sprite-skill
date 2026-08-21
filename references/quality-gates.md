@@ -8,6 +8,11 @@
 - required audio stream is absent or effectively silent;
 - output atlas, frame files, audio, manifest, or hashes are missing;
 - provider result or logs contain inline media payloads.
+- a declared LibTV source lacks `source.receipt.json`, either mandatory flag,
+  or an exact source/receipt hash match;
+- a LibTV generation used a LibTV-origin image/video reference without a valid
+  double-flag ancestor receipt, or reused a frame from an unreceipted/visibly
+  watermarked candidate.
 
 ## Automatic review
 
@@ -18,12 +23,19 @@
 - audio peak approaches clipping;
 - transient detection cannot find a plausible event;
 - model capability is unknown or native audio was requested from a silent model.
+- a LibTV candidate has passed the automatic receipt/hash checks but the
+  reviewer has not visually confirmed that no watermark is baked into frames.
 
 Local OGG extraction applies a deterministic `0.85` gain before lossy encoding so
 provider audio that arrives at or above full scale retains codec-safe headroom.
 The measured decoded output peak remains the QC authority.
 
 Thresholds are diagnostics, not aesthetic truth. Action-specific motion can legitimately change bounds, baseline, or occupied area.
+
+LibTV receipt 只证明双参数调用与 artifact 身份，不是“视觉无水印”证明。
+`--without-ai-watermark --vip` 仍可能无法清除已经烙在上游参考图/视频里的水印；
+因此上游 provenance 卫生与最终机器/视觉审查都不能省略。不要用裁切、涂抹或
+OCR 修补代替从干净祖先重新生成。
 
 ## User result decision
 

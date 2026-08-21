@@ -97,6 +97,15 @@ python scripts/video2sprite.py review --run-dir /absolute/path/to/run
 
 每个候选会生成透明逐帧 PNG、`atlas.png`、`sfx.ogg`、带声 `preview.mp4`、`manifest.json`、`qc.json` 和哈希绑定的 `approval.json`。可导出通用包或 Godot `SpriteFrames` 资源。
 
+LibTV 来源必须先通过内置包装器下载。包装器固定同时传递
+`--without-ai-watermark --vip`，并生成绑定下载文件哈希的 receipt；随后
+`attach-video --source-origin libtv --source-receipt ...` 才允许进入处理链。
+普通本地视频则显式使用 `--source-origin local`。如果 LibTV 节点使用了来自
+LibTV 的上游参考资产，还必须用其原始 artifact + receipt 声明并验证祖先链；
+不得从无 receipt 或已见水印的候选抽帧后再次上传。receipt 只证明命令参数与
+文件身份，不代替最终机器检查和视觉水印审查。完整命令见
+[`SKILL.md`](SKILL.md)。
+
 ## 开发验证
 
 ```bash

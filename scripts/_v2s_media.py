@@ -932,6 +932,12 @@ def _qc_report(
     for path in required_paths:
         if not path.is_file() or path.stat().st_size == 0:
             add("missing_output", "fail", f"Required output is missing: {path.name}")
+    if (candidate.get("source") or {}).get("origin") == "libtv":
+        add(
+            "libtv_visual_watermark_review_required",
+            "review",
+            "LibTV receipt and hashes passed; visually confirm that no watermark is baked into the frames",
+        )
     metrics = frame_result["metrics"]
     if metrics["edge_touch"]:
         add("foreground_touches_edge", "review", "Foreground alpha touches a cell edge")
@@ -1121,6 +1127,23 @@ def process_candidate_media(
         columns=columns,
         profile=profile,
     )
+    source_metadata = candidate.get("source") or {}
+    source_provenance: Dict[str, Any] = {
+        "path": "source.mp4",
+        "sha256": sha256_file(source),
+    }
+    if "origin" in source_metadata:
+        source_provenance["origin"] = source_metadata.get("origin")
+    receipt = source_metadata.get("receipt")
+    if isinstance(receipt, dict):
+        source_provenance["receipt"] = {
+            "path": receipt.get("path"),
+            "sha256": receipt.get("sha256"),
+            "receipt_type": receipt.get("receipt_type"),
+            "required_flags": receipt.get("required_flags"),
+            "proof_scope": receipt.get("proof_scope"),
+            "reference_audit": receipt.get("reference_audit"),
+        }
     manifest = {
         "schema_version": 1,
         "character_id": run_spec["character_id"],
@@ -1144,10 +1167,7 @@ def process_candidate_media(
         },
         "transform": frame_result["transform"],
         "provenance": {
-            "source": {
-                "path": "source.mp4",
-                "sha256": sha256_file(source),
-            },
+            "source": source_provenance,
             "master_sha256": run_spec["master"]["sha256"],
             "provider": candidate.get("provider"),
             "model_alias": candidate.get("model_alias"),
