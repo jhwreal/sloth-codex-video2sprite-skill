@@ -164,9 +164,17 @@ billed task. Use the single-candidate `poll` command only for diagnosis.
 After the user adopts the pilot, submit the remaining independent actions close
 together and advance the whole run in batches. Alternatively attach existing
 local MP4 files with `attach-video`, then run the same
-`advance --process-ready` command. The default budget permits at most two remote
-candidates per action. Exceed it only for a deliberate representative benchmark
-with `--allow-over-budget`.
+`advance --process-ready` command. When an existing candidate comes from a
+LibTV node, download the watermark-free member artifact with both explicit
+flags before attaching it:
+
+```bash
+libtv download -n <node> -o <dedicated-output-directory> \
+  --without-ai-watermark --vip
+```
+
+The default budget permits at most two remote candidates per action. Exceed it
+only for a deliberate representative benchmark with `--allow-over-budget`.
 
 ### 5. Process and QC locally
 
