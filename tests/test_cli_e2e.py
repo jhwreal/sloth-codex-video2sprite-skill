@@ -431,8 +431,17 @@ class OfflineEndToEndTests(unittest.TestCase):
             reviewer_html.index('id="title"'),
             reviewer_html.index("<main>"),
         )
+        self.assertIn('id="confirmed-toggle"', reviewer_html)
+        self.assertIn('id="confirmed-actions"', reviewer_html)
+        self.assertIn('fetch("confirmed-bound-queue.json"', reviewer_html)
+        self.assertIn("processIndex: 0", reviewer_html)
+        self.assertIn("confirmedIndex: 0", reviewer_html)
         self.assertIn(
-            "`第 ${state.index + 1} 个 / 共 ${state.entries.length} 个`",
+            "`制作过程：第 ${index + 1} 个 / 共 ${entries.length} 个`",
+            reviewer_html,
+        )
+        self.assertIn(
+            "`已确认：第 ${index + 1} 个 / 共 ${entries.length} 个`",
             reviewer_html,
         )
         self.assertNotIn('<aside>\n      <h1 id="title">', reviewer_html)

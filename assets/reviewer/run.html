@@ -8,14 +8,29 @@
     :root { color-scheme: dark; font: 15px/1.45 system-ui, sans-serif; background: #090d16; color: #edf2ff; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; }
-    header { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: auto 145px minmax(0, 1fr); align-items: center; gap: 42px; min-height: 52px; padding: 8px 14px; border-bottom: 1px solid #28334b; background: #101728; }
-    .header-actions { display: flex; gap: 8px; margin-right: 78px; }
+    header { position: sticky; top: 0; z-index: 3; display: grid; grid-template-columns: auto 205px minmax(0, 1fr); align-items: center; gap: 18px; min-height: 52px; padding: 8px 14px; border-bottom: 1px solid #28334b; background: #101728; }
+    .header-actions { display: flex; gap: 8px; }
     button { font: inherit; }
     header button { border: 1px solid #3a4967; border-radius: 7px; padding: 7px 10px; color: #edf2ff; background: #202c44; cursor: pointer; }
     header button:disabled { opacity: .4; cursor: default; }
+    header button.active { border-color: #d7a947; color: #fff4ce; background: #5a421c; }
     #counter { padding: 6px 10px; border: 1px solid #6382b4; border-radius: 7px; color: #f5f8ff; background: #23314c; box-shadow: 0 0 0 1px rgb(138 180 255 / 12%) inset; text-align: center; font-size: 14px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: .15px; white-space: nowrap; }
     #title { min-width: 0; overflow: hidden; color: #edf2ff; font-size: 16px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
     main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(330px, 34vw); min-height: calc(100vh - 52px); }
+    main.confirmed-mode { grid-template-columns: 260px minmax(0, 1fr) minmax(330px, 34vw); }
+    #confirmed-actions { position: sticky; top: 52px; height: calc(100vh - 52px); padding: 12px 10px 22px; border-right: 1px solid #28334b; background: #0d1422; overflow: auto; }
+    #confirmed-actions[hidden] { display: none; }
+    .action-group { margin: 10px 8px 7px; color: #8796b1; font-size: 11px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+    .action-link { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; width: 100%; margin: 0 0 6px; padding: 9px 10px; border: 1px solid #27344d; border-radius: 8px; color: #dce6fb; text-align: left; background: #151f32; cursor: pointer; }
+    .action-link:hover { border-color: #61789f; background: #1b2941; }
+    .action-link.selected { border-color: #8ab4ff; box-shadow: 0 0 0 1px #8ab4ff inset; background: #223451; }
+    .action-name { min-width: 0; overflow: hidden; font-weight: 780; text-overflow: ellipsis; white-space: nowrap; }
+    .action-id { grid-column: 1 / -1; min-width: 0; overflow: hidden; color: #8695af; font: 10px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+    .action-state { align-self: start; padding: 2px 5px; border-radius: 999px; font-size: 10px; font-weight: 800; white-space: nowrap; }
+    .state-runtime_bound { color: #baf4cf; background: #17442c; }
+    .state-runtime_registered { color: #d5dded; background: #39445a; }
+    .state-approved_unbound { color: #ffe6a6; background: #5b4318; }
+    .new-marker { color: #8ac6ff; }
     #frames { align-content: start; display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; padding: 14px; overflow: auto; }
     .frame { margin: 0; min-width: 0; border: 1px solid #28334b; border-radius: 9px; overflow: hidden; background: #121a2b; cursor: pointer; }
     .frame:hover { border-color: #61789f; }
@@ -38,11 +53,15 @@
     video { flex: 1; min-height: 0; border-radius: 10px; }
     #selected-frame { flex: 1; min-height: 0; border: 1px solid #28334b; border-radius: 10px; }
     #message { color: #ffd27b; }
+    #action-meta { display: grid; gap: 5px; padding: 9px 11px; border: 1px solid #33415d; border-radius: 8px; color: #cbd6ea; background: #162034; font-size: 12px; }
+    #action-meta[hidden] { display: none; }
+    #action-status { justify-self: start; }
+    #action-note { color: #9faeca; overflow-wrap: anywhere; }
     @media (max-width: 820px) {
       header { grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; }
-      .header-actions { margin-right: 0; }
       #title { grid-column: 1 / -1; }
-      main { grid-template-columns: 1fr; }
+      main, main.confirmed-mode { grid-template-columns: 1fr; }
+      #confirmed-actions { position: static; height: auto; max-height: 38vh; border-right: 0; border-bottom: 1px solid #28334b; }
       aside { position: static; height: auto; overflow: visible; border-left: 0; border-top: 1px solid #28334b; }
       #frames { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
       video, #selected-frame { min-height: 42vh; }
@@ -54,13 +73,20 @@
     <div class="header-actions">
       <button id="prev">← 上一个</button>
       <button id="next">下一个 →</button>
+      <button id="confirmed-toggle" disabled>已确认的（0）</button>
     </div>
     <span id="counter" aria-label="当前 Sprite 和总 Sprite 数">加载中…</span>
     <h1 id="title">动作资产工作台</h1>
   </header>
   <main>
+    <nav id="confirmed-actions" aria-label="已确认角色动作" hidden></nav>
     <section id="frames" aria-label="全部关键帧"></section>
     <aside>
+      <section id="action-meta" hidden aria-label="角色动作绑定状态">
+        <span id="action-status" class="action-state"></span>
+        <span id="action-binding"></span>
+        <span id="action-note"></span>
+      </section>
       <section class="viewer-panel video-panel" aria-labelledby="video-heading">
         <div class="viewer-heading"><h2 id="video-heading">动作播放</h2><span id="timing"></span></div>
         <video id="preview" controls loop playsinline></video>
@@ -74,8 +100,11 @@
   </main>
   <script>
     const state = {
-      entries: [],
-      index: 0,
+      mode: "process",
+      processEntries: [],
+      confirmedEntries: [],
+      processIndex: 0,
+      confirmedIndex: 0,
       renderToken: 0,
       frames: [],
       selectedFrameIndex: -1,
@@ -83,6 +112,12 @@
     };
     const byId = id => document.getElementById(id);
     const safePath = value => value ? encodeURI(value) : "";
+    const currentEntries = () => state.mode === "confirmed" ? state.confirmedEntries : state.processEntries;
+    const currentIndex = () => state.mode === "confirmed" ? state.confirmedIndex : state.processIndex;
+    const setCurrentIndex = value => {
+      if (state.mode === "confirmed") state.confirmedIndex = value;
+      else state.processIndex = value;
+    };
 
     function setVideo(path) {
       const video = byId("preview");
@@ -162,39 +197,129 @@
       }
     }
 
+    function renderConfirmedNavigation() {
+      const navigation = byId("confirmed-actions");
+      navigation.replaceChildren();
+      let previousGroup = "";
+      for (const [index, entry] of state.confirmedEntries.entries()) {
+        const group = entry.group || "其他";
+        if (group !== previousGroup) {
+          const heading = document.createElement("div");
+          heading.className = "action-group";
+          heading.textContent = group;
+          navigation.appendChild(heading);
+          previousGroup = group;
+        }
+        const button = document.createElement("button");
+        button.className = "action-link";
+        button.classList.toggle("selected", state.mode === "confirmed" && index === state.confirmedIndex);
+        button.type = "button";
+        button.title = `${entry.display_name || entry.action_id} · ${entry.state_label || ""}`;
+        const name = document.createElement("span");
+        name.className = "action-name";
+        name.textContent = entry.display_name || entry.action_id;
+        if (entry.new_this_round) {
+          const marker = document.createElement("span");
+          marker.className = "new-marker";
+          marker.textContent = " · 本轮";
+          name.appendChild(marker);
+        }
+        const status = document.createElement("span");
+        status.className = `action-state state-${entry.state || ""}`;
+        status.textContent = entry.state === "runtime_bound"
+          ? "已用"
+          : entry.state === "runtime_registered" ? "已装入" : "未绑定";
+        const identifier = document.createElement("span");
+        identifier.className = "action-id";
+        identifier.textContent = entry.action_id;
+        button.append(name, status, identifier);
+        button.onclick = () => {
+          state.confirmedIndex = index;
+          render().catch(error => { byId("message").textContent = error.message; });
+        };
+        navigation.appendChild(button);
+      }
+    }
+
+    function renderActionMeta(entry) {
+      const panel = byId("action-meta");
+      if (state.mode !== "confirmed") {
+        panel.hidden = true;
+        return;
+      }
+      panel.hidden = false;
+      const status = byId("action-status");
+      status.className = `action-state state-${entry.state || ""}`;
+      status.textContent = entry.state_label || entry.state || "正式角色动作";
+      const targets = entry.binding_targets || [];
+      byId("action-binding").textContent = targets.length
+        ? `使用位置：${targets.join("、")}`
+        : "使用位置：尚未绑定玩法";
+      const source = entry.source_review_sprite ? `来源审核 Sprite ${entry.source_review_sprite}。` : "";
+      byId("action-note").textContent = `${source}${entry.note || ""}`;
+    }
+
     async function render() {
-      const entry = state.entries[state.index];
+      const entries = currentEntries();
+      const index = currentIndex();
+      const entry = entries[index];
       if (!entry) return;
       const token = ++state.renderToken;
-      byId("counter").textContent = `第 ${state.index + 1} 个 / 共 ${state.entries.length} 个`;
-      const spriteName = `${entry.action_id} · ${entry.candidate_id}`;
+      byId("counter").textContent = state.mode === "confirmed"
+        ? `已确认：第 ${index + 1} 个 / 共 ${entries.length} 个`
+        : `制作过程：第 ${index + 1} 个 / 共 ${entries.length} 个`;
+      const spriteName = state.mode === "confirmed"
+        ? `${entry.display_name || entry.action_id} · ${entry.action_id}`
+        : `${entry.action_id} · ${entry.candidate_id}`;
       byId("title").textContent = spriteName;
       byId("title").title = spriteName;
       setVideo(entry.paths?.preview);
-      byId("prev").disabled = state.index === 0;
-      byId("next").disabled = state.index === state.entries.length - 1;
+      byId("prev").disabled = index === 0;
+      byId("next").disabled = index === entries.length - 1;
       byId("message").textContent = "";
       byId("selected-frame").removeAttribute("src");
       byId("selected-label").textContent = "请选择左侧帧";
       byId("frames").replaceChildren();
+      byId("timing").textContent = "";
+      renderActionMeta(entry);
+      renderConfirmedNavigation();
       const manifestPath = entry.paths?.manifest;
       if (!manifestPath) {
         byId("message").textContent = "缺少帧清单，请重新处理这个候选。";
         return;
       }
-      const manifest = await fetch(safePath(manifestPath), {cache: "no-store"}).then(response => response.json());
+      const manifest = await fetch(safePath(manifestPath), {cache: "no-store"}).then(response => {
+        if (!response.ok) throw new Error(`帧清单加载失败：HTTP ${response.status}`);
+        return response.json();
+      });
       if (token !== state.renderToken) return;
       byId("timing").textContent = `${manifest.frame_count} 帧 · ${manifest.fps} fps · ${manifest.duration_seconds}s`;
       renderFrames(manifest, manifestPath);
     }
 
     function move(delta) {
-      state.index = Math.max(0, Math.min(state.entries.length - 1, state.index + delta));
+      const entries = currentEntries();
+      setCurrentIndex(Math.max(0, Math.min(entries.length - 1, currentIndex() + delta)));
+      render().catch(error => { byId("message").textContent = error.message; });
+    }
+
+    function switchMode() {
+      if (!state.confirmedEntries.length) return;
+      state.mode = state.mode === "confirmed" ? "process" : "confirmed";
+      const confirmed = state.mode === "confirmed";
+      byId("confirmed-toggle").classList.toggle("active", confirmed);
+      byId("confirmed-toggle").setAttribute("aria-pressed", String(confirmed));
+      byId("confirmed-toggle").textContent = confirmed
+        ? `制作过程（${state.processEntries.length}）`
+        : `已确认的（${state.confirmedEntries.length}）`;
+      byId("confirmed-actions").hidden = !confirmed;
+      document.querySelector("main").classList.toggle("confirmed-mode", confirmed);
       render().catch(error => { byId("message").textContent = error.message; });
     }
 
     byId("prev").onclick = () => move(-1);
     byId("next").onclick = () => move(1);
+    byId("confirmed-toggle").onclick = switchMode;
     document.addEventListener("keydown", event => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -203,10 +328,24 @@
       event.preventDefault();
       moveSelectedFrame(event.key === "ArrowLeft" ? -1 : 1);
     });
-    fetch("review-queue.json", {cache: "no-store"}).then(response => response.json()).then(queue => {
-      state.entries = queue.entries || [];
-      if (!state.entries.length) throw new Error("没有可看的动作候选");
-      state.index = 0;
+    const requiredQueue = fetch("review-queue.json", {cache: "no-store"}).then(response => {
+      if (!response.ok) throw new Error(`制作过程队列加载失败：HTTP ${response.status}`);
+      return response.json();
+    });
+    const optionalConfirmedQueue = fetch("confirmed-bound-queue.json", {cache: "no-store"})
+      .then(response => response.ok ? response.json() : null)
+      .catch(() => null);
+    Promise.all([requiredQueue, optionalConfirmedQueue]).then(([processQueue, confirmedQueue]) => {
+      state.processEntries = processQueue.entries || [];
+      state.confirmedEntries = confirmedQueue?.entries || [];
+      if (!state.processEntries.length) throw new Error("没有可看的动作候选");
+      const toggle = byId("confirmed-toggle");
+      toggle.disabled = !state.confirmedEntries.length;
+      toggle.textContent = `已确认的（${state.confirmedEntries.length}）`;
+      toggle.title = state.confirmedEntries.length
+        ? "查看正式角色动作库；不会改变制作过程候选"
+        : "当前 run 尚未生成正式角色动作索引";
+      renderConfirmedNavigation();
       return render();
     }).catch(error => { byId("counter").textContent = error.message; });
   </script>
