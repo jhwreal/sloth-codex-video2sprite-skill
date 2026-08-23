@@ -431,19 +431,25 @@ class OfflineEndToEndTests(unittest.TestCase):
             reviewer_html.index('id="title"'),
             reviewer_html.index("<main>"),
         )
-        self.assertIn('id="confirmed-toggle"', reviewer_html)
-        self.assertIn('id="confirmed-actions"', reviewer_html)
-        self.assertIn('fetch("confirmed-bound-queue.json"', reviewer_html)
-        self.assertIn("processIndex: 0", reviewer_html)
-        self.assertIn("confirmedIndex: 0", reviewer_html)
+        self.assertIn('id="mode-process"', reviewer_html)
+        self.assertIn('id="mode-character"', reviewer_html)
+        self.assertIn('id="mode-game"', reviewer_html)
+        self.assertIn('id="game-select"', reviewer_html)
+        self.assertIn('id="action-navigation"', reviewer_html)
+        self.assertIn('fetch("character-action-queue.json"', reviewer_html)
+        self.assertIn("indices: {process: 0, character: 0}", reviewer_html)
+        self.assertIn("game.is_default", reviewer_html)
         self.assertIn(
-            "`制作过程：第 ${index + 1} 个 / 共 ${entries.length} 个`",
+            "`工作中（${state.processEntries.length}）`",
             reviewer_html,
         )
         self.assertIn(
-            "`已确认：第 ${index + 1} 个 / 共 ${entries.length} 个`",
+            "`角色动作（${state.characterEntries.length}）`",
             reviewer_html,
         )
+        self.assertIn("`游戏动作（${game.display_name} · ${game.bound_action_ids.length}）`", reviewer_html)
+        self.assertNotIn('id="confirmed-toggle"', reviewer_html)
+        self.assertNotIn('fetch("confirmed-bound-queue.json"', reviewer_html)
         self.assertNotIn('<aside>\n      <h1 id="title">', reviewer_html)
         self.assertIn("selectFrame(frame, manifestPath, figure)", reviewer_html)
         self.assertIn('event.key === "ArrowLeft"', reviewer_html)
