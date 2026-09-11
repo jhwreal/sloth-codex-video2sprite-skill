@@ -322,6 +322,17 @@ class OfflineEndToEndTests(unittest.TestCase):
             video2sprite._verify_approval(candidate)
         copied_receipt.write_bytes(clean_receipt_bytes)
 
+        action_path = candidate.parents[1] / "action.json"
+        original_action = action_path.read_text(encoding="utf-8")
+        changed_action = json.loads(original_action)
+        changed_action["motion"]["style"] = "restrained"
+        action_path.write_text(json.dumps(changed_action), encoding="utf-8")
+        self.assertFalse(video2sprite._approval_state(candidate)["valid"])
+        with self.assertRaisesRegex(video2sprite.Video2SpriteError, "approval is stale"):
+            video2sprite._verify_approval(candidate)
+        action_path.write_text(original_action, encoding="utf-8")
+        self.assertTrue(video2sprite._approval_state(candidate)["valid"])
+
         (candidate / "frames" / "frame_0000.png").write_bytes(b"corrupted")
         rebuilt = self._cli(
             "process",
@@ -566,8 +577,11 @@ class OfflineEndToEndTests(unittest.TestCase):
             image = self.Image.new("RGB", (160, 96), matte)
             draw = self.ImageDraw.Draw(image)
             x = 52 + int(round(24 * index / 47))
-            draw.rectangle((x, 18, x + 26, 80), fill=(235, 195, 112))
-            draw.rectangle((x + 9, 34, x + 17, 60), fill=matte)
+            # A deep crouch/wide extension must survive fixed-canvas processing;
+            # matching every frame's bounding height would erase this pose change.
+            extension = 20 if 12 <= index < 36 else 0
+            draw.rectangle((x, 18 + extension, x + 26 + extension, 80), fill=(235, 195, 112))
+            draw.rectangle((x + 9, 44, x + 17, 60), fill=matte)
             image.save(raw_frames / f"frame_{index:04d}.png", format="PNG")
         subprocess.run(
             [
@@ -655,6 +669,11 @@ class OfflineEndToEndTests(unittest.TestCase):
             {"x": 80.0, "y": 80.0, "normalized": [0.5, 0.83333333]},
         )
         self.assertEqual(len(list((candidate / "frames").glob("frame_*.png"))), 48)
+        bounds = [frame["alpha_bounds"] for frame in manifest["frames"]]
+        self.assertAlmostEqual(bounds[-1]["x"] - bounds[0]["x"], 24, delta=2)
+        self.assertGreater(bounds[20]["width"] - bounds[0]["width"], 15)
+        self.assertGreater(bounds[0]["height"] - bounds[20]["height"], 15)
+        self.assertTrue(all(frame["pivot"] == manifest["frames"][0]["pivot"] for frame in manifest["frames"]))
 
 
 class AudioHeadroomTests(unittest.TestCase):

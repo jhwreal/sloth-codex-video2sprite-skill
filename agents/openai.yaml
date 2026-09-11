@@ -1,4 +1,4 @@
 interface:
   display_name: "Sloth Video to Sprite"
   short_description: "Own the full path from action video to game-ready sprites"
-  default_prompt: "Use $sloth-codex-video2sprite-skill with its local media firewall and paid-pilot gate to turn this character reference into a smooth, fixed-pivot game sprite action and a runnable Godot package."
+  default_prompt: "Use $sloth-codex-video2sprite-skill with its media firewall and paid-pilot gate to create expressive sprite motion with clear body poses at gameplay size, action-appropriate timing and endings, a fixed canvas pivot, synchronized sound, and a runnable Godot package."

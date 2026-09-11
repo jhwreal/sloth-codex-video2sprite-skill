@@ -31,6 +31,10 @@ provider audio that arrives at or above full scale retains codec-safe headroom.
 The measured decoded output peak remains the QC authority.
 
 Thresholds are diagnostics, not aesthetic truth. Action-specific motion can legitimately change bounds, baseline, or occupied area.
+Judge root movement against the declared `motion.root_motion` and ending, rather
+than treating every lunge, crouch, recoil, jump, or collapse as drift. Bounds
+variation is not a measurement of anatomical scale pumping. Machine QC does not
+currently measure pose amplitude or prove that a weak action gained impact.
 
 LibTV receipt 只证明双参数调用与 artifact 身份，不是“视觉无水印”证明。
 `--without-ai-watermark --vip` 仍可能无法清除已经烙在上游参考图/视频里的水印；
@@ -45,6 +49,13 @@ Review:
 - required hand-to-handle contact and the absence of unrelated secondary
   equipment such as guns, holsters, scabbards, sheaths, pouches, or backpacks;
 - action readability, weight, anticipation, impact, recovery, and loop;
+- at final gameplay pixel size and playback speed, distinct key silhouettes
+  and intended timing contrast; forceful actions should involve the body rather
+  than only the wrist/weapon, while idle stays appropriately controlled;
+- amplitude of the body independent of large VFX, preserved anatomical scale,
+  and enough canvas reach without clipping or making the character tiny;
+- ending and root behavior match `motion`: recovery at the appropriate root,
+  retained death/transformation/bridge pose, or a continuous loop without a pause;
 - for linked combos, exact adjacent-stage boundary continuity and no visible
   idle reset before the final stage;
 - anatomy and temporal consistency;

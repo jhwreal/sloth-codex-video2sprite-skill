@@ -288,21 +288,24 @@ def fingerprint(value: Any) -> str:
 
 def action_processing_fingerprint(action: Dict[str, Any]) -> str:
     """Hash only fields that can change deterministic processing or review meaning."""
-    return fingerprint(
-        {
-            "prompt_sha256": action.get("prompt_sha256"),
-            "frame_count": action.get("frame_count"),
-            "sampling": action.get("sampling"),
-            "columns": action.get("columns"),
-            "duration_seconds": action.get("duration_seconds"),
-            "window": action.get("window"),
-            "loop": action.get("loop"),
-            "audio_required": action.get("audio_required"),
-            "events": action.get("events"),
-            "chroma": action.get("chroma"),
-            "video": action.get("video"),
-        }
-    )
+    payload = {
+        "prompt_sha256": action.get("prompt_sha256"),
+        "frame_count": action.get("frame_count"),
+        "sampling": action.get("sampling"),
+        "columns": action.get("columns"),
+        "duration_seconds": action.get("duration_seconds"),
+        "window": action.get("window"),
+        "loop": action.get("loop"),
+        "audio_required": action.get("audio_required"),
+        "events": action.get("events"),
+        "chroma": action.get("chroma"),
+        "video": action.get("video"),
+    }
+    # A Skill update must not invalidate unchanged legacy artifacts or approval.
+    # Explicit direction changes alter review meaning even for an attached video.
+    if "motion" in action:
+        payload["motion"] = action["motion"]
+    return fingerprint(payload)
 
 
 def candidate_processing_fingerprint(

@@ -2,7 +2,7 @@
 
 ## Precedence
 
-Resolve every setting in this order:
+Resolve provider and model settings in this order:
 
 1. CLI argument.
 2. Candidate, action, or run JSON.
@@ -10,6 +10,13 @@ Resolve every setting in this order:
 4. `assets/model-presets.json`.
 
 Do not silently replace an explicitly selected provider or model.
+
+Motion direction is action-local: `add-action --motion-style`, `--root-motion`,
+and `--end-state` are stored in `action.json.motion`; submission reads that
+record. Defaults are `pixel-act`, `in-place`, and `recover` (or `loop` when
+`--loop` is set). There are no motion environment overrides. See
+`prompting.md` for action-specific selection and `job-schema.md` for legacy
+compatibility and fingerprint behavior.
 
 ## Credentials
 

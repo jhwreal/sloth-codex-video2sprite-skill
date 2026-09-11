@@ -49,11 +49,30 @@ Runtime media belongs in the run, never in the Skill source.
 - `action_id`, prompt, frame count, requested/effective FPS, source duration,
   and action window;
 - loop flag and audio requirement;
+- `motion`: `{ "style": "pixel-act", "root_motion": "in-place",
+  "end_state": "recover" }` by default for a new non-loop action;
 - matte key, border/global mode, threshold, and softness;
 - optional event names;
 - candidate identifiers.
 
 One action must describe one semantic motion. Do not put several attacks or camera cuts in one action.
+
+`motion.style` accepts `pixel-act`, `restrained`, or `natural`.
+`motion.root_motion` accepts `in-place`, `planted`, or `travel`.
+`motion.end_state` accepts `recover`, `hold`, or `loop`; `loop` must agree with
+the existing loop flag and cannot accumulate `travel`. The CLI supplies `loop`
+from `--loop`; non-loops may select `--end-state recover|hold`. The detailed
+meaning and action examples are in `prompting.md`. Invalid motion settings are
+rejected before creating an action or submitting provider work.
+
+Older actions without `motion` remain readable and keep their existing
+processing/review fingerprints. A new submission for such an action uses the
+current prompt defaults (loop ending when its loop flag is set, otherwise
+recover); it does not regenerate or rewrite an existing candidate. Explicitly
+adding or changing `motion` changes action/processing fingerprints and makes
+old approvals stale. Updating metadata or reprocessing alone does not improve
+an already-generated video's movement; a new source or explicit acceptance of
+that existing source is needed. No automatic migration or paid retry occurs.
 
 A linked multi-input combo may use one continuous paid source video, but its
 deliverables remain one action per player input. Derived stages share the same
@@ -68,7 +87,7 @@ not return to idle; early combo termination uses a separate recovery branch.
 - purpose (`draft`, `final`, or `benchmark`);
 - input hash and optional seed;
 - a bounded request summary with reference role, resolution, ratio, duration,
-  audio, and watermark flags;
+  audio, watermark flags, resolved `motion`, and effective `prompt_sha256`;
 - a sanitized URL/asset reference or canonical local path, never inline media;
 - task ID and bounded status;
 - local source path and SHA-256;
@@ -94,6 +113,9 @@ The fingerprint covers the source, master, action semantics, output geometry,
 atlas columns, profile, processor schema, source origin, and LibTV receipt hash
 when present. A matching fingerprint plus the required files is a reusable
 processing cache entry.
+Explicit action `motion` settings are included in the action fingerprint, so
+the review contract cannot be changed while retaining an old approval. They
+are prompt/review metadata, not a per-frame root-motion track for the engine.
 
 ## Approval
 

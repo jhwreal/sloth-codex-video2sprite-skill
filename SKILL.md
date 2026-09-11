@@ -15,6 +15,10 @@ This Skill is self-contained. Do not invoke, import, or require
 `my-codex-sprite-skill` or any other sprite Skill. Existing project sprites may
 serve as visual and motion benchmarks only. Read
 `references/sprite-production.md` before defining a production action.
+For pixel ACT work, also read `references/prompting.md`: default to strong,
+distinct full-body combat poses and sharp timing contrast at gameplay size,
+with controlled idle motion. Fixed camera and canvas pivot do not freeze the
+body. Select root behavior and ending from the action's gameplay meaning.
 
 ## Non-negotiable media firewall
 
@@ -68,7 +72,8 @@ Read only the reference needed for the current step:
 - `references/efficiency.md`: batch orchestration, pilot strategy, cache behavior, and retry budgets.
 - `references/job-schema.md`: run, action, candidate, manifest, and approval contracts.
 - `references/provider-contracts.md`: GPT Image 2 and selectable video-provider behavior.
-- `references/prompting.md`: fixed-camera game-action, dark-matte, and dry-SFX prompting.
+- `references/prompting.md`: pixel ACT pose/timing direction, root/end-state
+  choices, fixed camera, dark matte, and dry SFX; apply to every provider path.
 - `references/sprite-production.md`: canonical master, motion beats, frame-rate, pivot, atlas, and engine acceptance rules.
 - `references/quality-gates.md`: automatic QC and human approval requirements.
 
@@ -122,6 +127,9 @@ python "$SKILL_DIR/scripts/video2sprite.py" add-action \
   --duration 4 \
   --window-start 0 \
   --window-duration 1.75 \
+  --motion-style pixel-act \
+  --root-motion in-place \
+  --end-state recover \
   --audio-required
 ```
 
@@ -129,6 +137,24 @@ Define one semantic action per video. `--fps 24` preserves every 24fps source
 frame inside the effective action window; it does not sparsely sample a few
 poses. Keep the full provider video as evidence, but exclude only deliberate
 pre/post-action holds from the runtime atlas.
+
+Write the move's weight, contrasting body poses, and fast/slow phases into the
+brief; the CLI appends the effective source-time window and motion direction.
+`pixel-act` is the default motion style: forceful attacks/recoil/collapse use
+large pose differences, light attacks remain quick, and idle stays controlled.
+Use `restrained` or `natural` when the brief calls for it. These settings direct
+motion and preserve the reference's rendering style.
+
+Default to `in-place` when the engine owns movement: allow temporary crouches,
+weight shifts, lifted feet, and lunges while retaining a fixed canvas pivot.
+Choose `planted` only for a named support contact that really must stay fixed;
+choose `travel` only for intentional baked displacement. Ordinary recoverable
+actions use `--end-state recover`. Death, transformation, and a separately
+generated middle combo stage use `--end-state hold` with an explicit terminal
+or bridge pose. A loop uses `--loop` without `--end-state`; accumulated `travel`
+cannot be a seamless in-place loop. Resolve these choices from the brief rather
+than asking the user to configure every action. Do not modify gameplay movement,
+collision shapes, or attack timing to accommodate a weak generated result.
 
 ### 4. Submit or attach candidate videos
 
@@ -304,12 +330,15 @@ Accept a final action only when:
 - the requested frame count, atlas geometry, timing, pivot, and hashes are complete;
 - no frame is empty, clipped, or contaminated by the extraction matte;
 - one shared spatial transform preserves motion without per-frame scale pumping;
-- the first and final ready poses share the configured foot-root, and a
-  one-shot action returns to its starting place;
+- root and ending match the declared motion contract: in-place recovery returns
+  to the opening root, deliberate travel ends at its destination, terminal/bridge
+  poses persist, and loops join without an end pause;
 - fast anticipation, contact, follow-through, and recovery retain their full
   requested frame rate; only redundant holds may be omitted;
 - required audio exists, is not silent or clipped, and remains synchronized with the frame timings;
 - loop seams and event markers are reviewed when relevant;
 - identity, view, style, action readability, coherent VFX direction, and sound
   earn the user's “use this” decision;
+- forceful actions have distinct body silhouettes and timing contrast at final
+  gameplay pixel size, without relying on oversized VFX; idle remains controlled;
 - the packaged action is tested in the target engine.

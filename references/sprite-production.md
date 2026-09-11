@@ -13,6 +13,8 @@ match and record:
 - logical frame size, foot-root pivot, character height, and safe margins;
 - runtime FPS and any per-frame holds;
 - anticipation, contact, follow-through, recovery, and event frame;
+- intended pose contrast at final gameplay pixel size, move weight, root
+  behavior, and terminal state (recover, hold, or loop);
 - whether the effect is composite or must remain a separate engine layer;
 - target-engine import mode, filtering, atlas-size limit, and animation name.
 
@@ -22,10 +24,12 @@ and visual quality when requested.
 
 ## 2. Lock one canonical opening frame
 
-Use one approved, fully visible, right-facing game pose with every identity-critical
-feature and required held prop already present. Author it on the same flat matte
-and aspect ratio requested from the video provider. Put the foot root at a known
-image coordinate and leave enough reach for the complete weapon arc.
+Use one approved, fully visible game pose in the target facing direction with
+every identity-critical feature and required held prop already present. Author
+it on the same flat matte and aspect ratio requested from the video provider.
+Establish standing character pixel height and a known opening root coordinate,
+then plan the largest pose and complete weapon arc around it. Avoid excessive
+empty margins that make the character tiny after downscaling.
 
 Do not use an unrelated character, generic robot, placeholder costume, or a
 weaponless master for a sword action.
@@ -42,12 +46,26 @@ master is approved.
 Write the provider prompt in temporal order:
 
 1. a very short readable starting hold;
-2. anticipation with weight transfer;
+2. anticipation with a visibly distinct silhouette and weight transfer;
 3. acceleration driven by hips, torso, shoulders, hands, and prop;
 4. one unambiguous contact direction;
 5. follow-through with secondary hair and cloth lag;
-6. recovery to the original foot root and matching ready pose;
-7. a still end hold for local trimming.
+6. the specified ending: recovery for a standalone recoverable move, a terminal
+   pose for death/form change, or a bridge for a middle combo stage;
+7. optional still padding outside the effective window (none at a loop seam).
+
+Default pixel ACT combat to `--motion-style pixel-act`, following the action
+table and root/end-state settings in `references/prompting.md`. Drive forceful
+actions with knees, pelvis, torso, and shoulders as well as the weapon. Light
+attacks remain quick; heavy attacks get deeper weight transfer and a more
+committed follow-through. Idle remains controlled. Fixed camera and apparent
+scale constrain registration, not body articulation or silhouette width.
+
+Specify pose amplitude and temporal contrast together. The complete action and
+its ending must fit the effective runtime window; extra provider duration is
+padding, not a reason to make the strike slow. Preserve all source frames and
+put gameplay hit-stop in the engine unless asset-level timing is deliberate.
+Never enlarge collision shapes or change the controller merely to match VFX.
 
 State the side-view direction, exact prop count, hand relationship, root behavior,
 and forbidden alternatives. For a sword slash, allow one blade and one trailing
@@ -59,8 +77,10 @@ Do not confuse canvas direction with depth direction. For a right-facing
 side-view character, screen-right is forward toward the enemy and screen-left is
 behind the character. An inward/outward slash may alternate between the far and
 near picture planes, but every contact must remain in the forward attack zone.
-Reject any middle-stage turn that reverses facing or sends the blade and trail
-behind the spine.
+Reject any middle-stage turn that reverses facing or sends contact and attack
+VFX into the rear zone. Allow a brief-specified weapon windup above/behind the
+body and torso rotation within the side view; do not suppress anticipation to
+enforce a forward contact direction.
 
 ## 4. Preserve motion frames
 
@@ -73,6 +93,10 @@ action.
 If the target game later needs a lower-rate pixel animation, derive it from the
 full-rate master with explicit motion-aware timing and retain the 24fps master.
 Never delete the only high-rate sequence.
+Keep readable anticipation, contact, and follow-through poses when designing
+that timing. Uniform frame dropping, faster playback, or interpolation alone
+does not increase pose amplitude; reject weak source motion instead of claiming
+that a timing conversion fixed it.
 
 ## 5. Split a linked combo without resetting its momentum
 
@@ -80,6 +104,10 @@ When several player inputs form one continuous combo, use one uninterrupted
 provider source for the whole sequence, then derive one gameplay action per
 input. Four inputs and four strikes therefore become four action assets even
 when they share one paid source video.
+
+For a separately generated middle stage, use `--end-state hold` and describe
+its bridge pose. For a continuous whole-combo source, declare the exact total
+hit count in the brief; the whole source ends according to the final stage.
 
 Do not return to the opening idle pose between middle stages. Choose a readable
 bridge pose after each impact: the final frame of stage N must be the exact
@@ -112,7 +140,11 @@ colored fringes.
 For an authored provider canvas, use `placement=fixed`: resize the complete source
 canvas once into every logical frame. Never recenter or rescale each frame.
 Package the configured pivot in every frame record. Let root drift remain visible
-so QC and the user can reject it instead of hiding it.
+so QC and the user can judge it against the declared root policy. A pivot is a
+canvas registration coordinate, not a body-part tracker. Do not recenter a lunge,
+remove a legitimate jump, or normalize crouched and extended poses to equal
+bounding-box height. Default to `in-place` when engine code moves the actor;
+use `travel` only for deliberately baked movement and avoid applying it twice.
 
 Use `fit-union` only for legacy footage that lacks target-canvas framing. It still
 uses one union crop and one scale for the whole sequence.
@@ -122,6 +154,12 @@ uses one union crop and one scale for the whole sequence.
 Machine checks must cover empty frames, matte mismatch, edge clipping, scale
 pumping, root drift, first/end pose difference, audio presence and headroom,
 atlas geometry, hashes, and event timing.
+
+Evaluate bounds/baseline diagnostics against the move: crouches, recoil,
+extension, and collapse legitimately change them. These metrics cannot prove
+expressiveness. At actual gameplay size and speed, the user must be able to
+distinguish the action's key silhouettes and perceive the intended weight even
+without a large trail. Enlarged frame inspection alone is insufficient.
 
 The localhost workbench shows all extracted frames on the left, the action video
 at the upper right, and an enlarged selected frame at the lower right. Click a

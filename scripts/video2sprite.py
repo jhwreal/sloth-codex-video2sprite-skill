@@ -82,6 +82,9 @@ ARK_RATIOS = ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive")
 KEY_MODES = ("border", "global")
 PLACEMENT_MODES = ("fixed", "fit-union")
 RESAMPLING_MODES = ("nearest", "lanczos")
+MOTION_STYLES = ("pixel-act", "restrained", "natural")
+ROOT_MOTIONS = ("in-place", "planted", "travel")
+END_STATES = ("recover", "hold", "loop")
 LIBTV_MEDIA_SUFFIXES = frozenset(
     {".mp4", ".mov", ".m4v", ".webm", ".png", ".jpg", ".jpeg", ".webp"}
 )
@@ -311,6 +314,110 @@ def _master_prompt(user_prompt: str, chroma_key: str) -> str:
     )
 
 
+def _motion_settings(action: Dict[str, Any]) -> Dict[str, str]:
+    """Resolve explicit direction without guessing action semantics from its ID."""
+    raw = action.get("motion", {})
+    if not isinstance(raw, dict):
+        raise Video2SpriteError("Action motion must be an object")
+    if set(raw) - {"style", "root_motion", "end_state"}:
+        raise Video2SpriteError("Unknown action motion field")
+    motion = {
+        "style": raw.get("style", "pixel-act"),
+        "root_motion": raw.get("root_motion", "in-place"),
+        "end_state": raw.get("end_state", "loop" if action.get("loop") else "recover"),
+    }
+    for name, choices in (
+        ("style", MOTION_STYLES),
+        ("root_motion", ROOT_MOTIONS),
+        ("end_state", END_STATES),
+    ):
+        if motion[name] not in choices:
+            raise Video2SpriteError(f"Motion {name} must be one of: {', '.join(choices)}")
+    if (motion["end_state"] == "loop") != bool(action.get("loop")):
+        raise Video2SpriteError("Motion end_state must be loop exactly when --loop is set")
+    if action.get("loop") and motion["root_motion"] == "travel":
+        raise Video2SpriteError(
+            "A seamless loop cannot accumulate travel; use in-place and let the engine move the actor"
+        )
+    return motion
+
+
+def _motion_direction(motion: Dict[str, str]) -> str:
+    styles = {
+        "pixel-act": (
+            "Direct pose-led pixel ACT animation readable at the final gameplay pixel size. "
+            "For attacks and other forceful actions, exaggerate the whole-body key poses: "
+            "clear knee flexion and weight transfer, strong hip and shoulder rotation within "
+            "the approved side view, torso lean, and fully committed limb or weapon reach. "
+            "Separate anticipation, contact, and follow-through silhouettes; avoid wrist-only "
+            "or forearm-only motion. Use readable anticipation, a much faster release, a brief "
+            "contact emphasis, and substantial follow-through with delayed hair and cloth. "
+            "Do not distribute a strike at constant speed across the clip. For hit reactions, "
+            "show a decisive directional recoil; for death, commit to a clear collapse. "
+            "For locomotion, use distinct contact and passing poses with a readable stride. "
+            "For idle, keep controlled breathing and compact weight shifts; do not add attacks, "
+            "lunges, hops, or a large sway. Honor the brief's action weight, timing, and anatomy; "
+            "quick attacks need a shorter windup than heavy attacks. Exaggerate articulation "
+            "and pose spacing, not limb length or character size. Body motion must read without "
+            "VFX; larger trails, camera tricks, motion blur, or extra hits are not substitutes."
+        ),
+        "restrained": (
+            "Use restrained, deliberate pose changes appropriate to the described action. "
+            "Keep silhouettes and any contact readable at gameplay size, with economical "
+            "weight transfer and controlled secondary motion. Avoid added flourish or "
+            "overshoot; preserve the brief's intended action, reach, and timing."
+        ),
+        "natural": (
+            "Use natural, weight-driven body mechanics and the amplitude specified in the "
+            "brief. Coordinate hips, torso, shoulders, and limbs; keep the action readable "
+            "without imposing extreme stylized poses or additional flourishes."
+        ),
+    }
+    roots = {
+        "in-place": (
+            "Animate around the opening stage anchor with bounded pose displacement. "
+            "Allow weight shifts, crouches, torso rotation, lifted feet, and short lunges "
+            "when the action calls for them; do not pin both feet or freeze the pelvis. "
+            "Avoid accumulating locomotion across the canvas. The canvas pivot is a fixed "
+            "registration point, not a foot that must occupy the same pixel in every pose."
+        ),
+        "planted": (
+            "Keep the support contact specified in the brief planted at its stage anchor "
+            "while it bears weight. Articulate knees, hips, torso, arms, and the free limb "
+            "around that contact; planted support does not mean a rigid body."
+        ),
+        "travel": (
+            "Bake only the deliberate root travel described in the brief into the fixed "
+            "canvas. Allow the body to move to the specified destination; do not recenter "
+            "it or slide it back to the opening coordinate. Keep the full path inside frame."
+        ),
+    }
+    if motion["end_state"] == "loop":
+        ending = (
+            "Complete a seamless cycle: the final pose, root position, and velocity connect "
+            "to the opening state. Do not insert a still end hold or a recovery to idle."
+        )
+    elif motion["end_state"] == "hold":
+        ending = (
+            "Perform the requested action once and end in the terminal or combo bridge pose "
+            "specified in the brief. Do not return to the opening ready pose, resurrect a "
+            "fallen character, or undo a transformation. Preserve follow-through into a "
+            "bridge; any extra still padding belongs after the effective action window."
+        )
+    else:
+        destination = (
+            "at the destination root"
+            if motion["root_motion"] == "travel"
+            else "at the original root"
+        )
+        ending = (
+            "Perform the requested action once, then recover with visible follow-through "
+            f"to the matching ready pose {destination}. Use a brief readable end hold; "
+            "do not repeat the action or snap back."
+        )
+    return f"{styles[motion['style']]} {roots[motion['root_motion']]} {ending}"
+
+
 def _video_prompt(
     action: Dict[str, Any], *, reference_role: str = "first_frame"
 ) -> str:
@@ -321,14 +428,19 @@ def _video_prompt(
         if action.get("audio_required")
         else "Do not add music, voice, ambience, or camera sounds."
     )
-    loop_text = (
-        "The pose, foot-root, and velocity must return cleanly to the exact opening state for a seamless loop."
-        if action.get("loop")
-        else (
-            "Begin with a very short readable hold, perform exactly one action, recover to the "
-            "same foot-root and matching ready pose, then remain still. Do not repeat the action."
+    motion_text = _motion_direction(_motion_settings(action))
+    window = action.get("window") or {}
+    window_start = float(window.get("start_seconds", 0))
+    window_duration = window.get("duration_seconds", action.get("duration_seconds"))
+    timing_text = ""
+    if window_duration is not None:
+        window_end = window_start + float(window_duration)
+        timing_text = (
+            f"The effective action window is source time {window_start:g}s to {window_end:g}s. "
+            "Fit the complete requested motion and its specified ending inside this window. "
+            "Keep redundant padding outside it; do not stretch a fast action to fill the "
+            "provider's longer video duration. "
         )
-    )
     reference_text = (
         "Use input image 1 as the exact opening frame and preserve it as the character identity anchor."
         if reference_role == "first_frame"
@@ -339,14 +451,17 @@ def _video_prompt(
         f"{reference_text} "
         "This is source footage for one 2D game-sprite action, not a cinematic shot. "
         "Sprite-source constraints: exactly one full-body character; preserve identity, outfit, "
-        "palette, proportions, view, handedness, and props from the reference. Lock the camera "
-        "and framing as an orthographic side-view stage. Keep the foot-root at one fixed image "
-        "coordinate; body anticipation may compress and a strike may lunge, but the character "
-        "must recover to the original root. No zoom, pan, shake, perspective shift, cuts, "
+        "palette, anatomical proportions, view, handedness, and props from the reference. "
+        "Preserve the character design, not the opening pose throughout the action. "
+        "Honor any explicitly requested form change in the action brief. "
+        "Lock the camera and framing as an orthographic side-view stage. Keep apparent "
+        "character scale stable while allowing articulated pose bounds to change. Keep the "
+        "complete body and intended weapon path visible without shrinking the character "
+        "during extreme poses. No zoom, pan, shake, perspective shift, cuts, "
         "scenery, floor, cast shadow, text, subtitles, logo, watermark, UI, or extra characters. "
         f"Keep a perfectly flat, unlit, textureless solid {key} extraction matte for every frame; "
         "do not add a green screen, gradient, horizon, vignette, or colored rim light. "
-        f"{loop_text} {sound}"
+        f"{motion_text} {timing_text}{sound}"
     )
 
 
@@ -773,6 +888,17 @@ def command_add_action(args: argparse.Namespace) -> Dict[str, Any]:
     if destination.exists():
         raise Video2SpriteError(f"Action already exists: {action_id}")
     prompt = _read_prompt(args)
+    motion = _motion_settings(
+        {
+            "loop": bool(args.loop),
+            "motion": {
+                "style": getattr(args, "motion_style", "pixel-act"),
+                "root_motion": getattr(args, "root_motion", "in-place"),
+                "end_state": getattr(args, "end_state", None)
+                or ("loop" if args.loop else "recover"),
+            },
+        }
+    )
     if args.duration <= 0 or args.duration > 60:
         raise Video2SpriteError("Duration must be greater than 0 and no more than 60 seconds")
     window_duration = args.window_duration or args.duration
@@ -839,6 +965,7 @@ def command_add_action(args: argparse.Namespace) -> Dict[str, Any]:
             "duration_seconds": round(window_duration, 6),
         },
         "loop": bool(args.loop),
+        "motion": motion,
         "audio_required": bool(args.audio_required),
         "events": args.event or [],
         "chroma": {
@@ -865,6 +992,7 @@ def command_add_action(args: argparse.Namespace) -> Dict[str, Any]:
         "frame_count": frame_count,
         "fps": sampling["fps"],
         "duration_seconds": args.duration,
+        "motion": motion,
         "audio_required": bool(args.audio_required),
     }
 
@@ -1165,6 +1293,8 @@ def command_submit(args: argparse.Namespace) -> Dict[str, Any]:
         "reference": reference_summary,
         "request": {
             "reference_role": args.reference_role,
+            "motion": _motion_settings(action),
+            "prompt_sha256": fingerprint(request_prompt),
             "resolution": args.resolution,
             "ratio": args.ratio,
             "duration_seconds": action["duration_seconds"],
@@ -2515,6 +2645,23 @@ def _build_parser() -> argparse.ArgumentParser:
     add_action.add_argument("--window-start", type=float, default=0.0)
     add_action.add_argument("--window-duration", type=float)
     add_action.add_argument("--loop", action="store_true")
+    add_action.add_argument(
+        "--motion-style",
+        choices=MOTION_STYLES,
+        default="pixel-act",
+        help="Motion direction: pixel-act (default), restrained, or natural; does not change rendering style",
+    )
+    add_action.add_argument(
+        "--root-motion",
+        choices=ROOT_MOTIONS,
+        default="in-place",
+        help="Root behavior: bounded in-place motion (default), planted support, or baked travel",
+    )
+    add_action.add_argument(
+        "--end-state",
+        choices=("recover", "hold"),
+        help="Non-loop ending: recover (default), or hold a terminal/bridge pose; --loop supplies loop",
+    )
     add_action.add_argument("--audio-required", action="store_true")
     add_action.add_argument("--event", action="append")
     add_action.add_argument("--chroma-key")

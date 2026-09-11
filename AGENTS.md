@@ -16,6 +16,16 @@ Create high-quality 2D game sprite animations with synchronized sound from a can
 
 Do not depend on or modify `my-codex-sprite-skill`. Do not make a conversational image tool part of the production path. Do not infer gameplay hitboxes, projectile behavior, or approval from pixels alone.
 
+## Pixel ACT motion
+
+Use action-appropriate pose contrast and timing at final gameplay pixel size.
+Keep the camera, anatomical scale, and canvas pivot stable without freezing the
+body or normalizing every pose's bounds. Preserve explicit root and terminal
+state choices: terminal/bridge actions must not be forced back to idle. Motion
+settings belong in action/request provenance and review fingerprints. Keep
+unchanged legacy processing caches valid. Offline prompt tests verify routing
+and contracts, not a provider's visual improvement; judge real output on a pilot.
+
 ## Media firewall
 
 - Never print or return Base64, data URLs, media bytes, signed URL query strings, full provider payloads, credentials, or unbounded logs.
