@@ -60,8 +60,10 @@ Review:
   idle reset before the final stage;
 - anatomy and temporal consistency;
 - transparent edges on checker, light, and dark backgrounds;
-- baked effects and their spatial extent;
-- sound identity, cleanliness, loudness, duration, and synchronization;
+- no added visual effects: slash arcs, trails, afterimages, particles, sparks,
+  smoke/dust, glow, flashes, shockwaves, or screen effects;
+- no background music (BGM), soundtrack, singing, speech, or ambience; required
+  action sound remains present, clean, audible, and synchronized;
 - proposed gameplay event frame.
 
 Use the localhost workbench: all extracted frames fill the left pane, the

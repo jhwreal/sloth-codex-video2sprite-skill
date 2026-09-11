@@ -19,6 +19,8 @@ Do not depend on or modify `my-codex-sprite-skill`. Do not make a conversational
 ## Pixel ACT motion
 
 Use action-appropriate pose contrast and timing at final gameplay pixel size.
+Generate clean character/prop animation with no added visual effects and no
+background music (BGM). Required synchronized action sound effects remain enabled.
 Keep the camera, anatomical scale, and canvas pivot stable without freezing the
 body or normalizing every pose's bounds. Preserve explicit root and terminal
 state choices: terminal/bridge actions must not be forced back to idle. Motion

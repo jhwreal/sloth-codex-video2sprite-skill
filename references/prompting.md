@@ -15,8 +15,8 @@ Request:
 - only brief-required equipment, with no unrelated gun, holster, scabbard,
   sheath, pouch, backpack, or secondary prop.
 
-Default to a dark non-green matte absent from the character and intended visual
-effects. For a navy character, prefer a distinct dark aubergine or oxblood hue
+Default to a dark non-green matte absent from the character and required props.
+For a navy character, prefer a distinct dark aubergine or oxblood hue
 instead of blue-black.
 
 For pixel games, establish the standing character's **final pixel height** first,
@@ -42,7 +42,9 @@ Use one action per clip. State:
   still end pose in temporal order;
 - separate fixed camera/canvas registration from the moving body; choose the
   root behavior and ending described below instead of fixing both feet;
-- request only diegetic action sound: no music, dialogue, narration, ambience, or reverb tail.
+- request clean character/prop movement without added visual effects;
+- request only synchronized dry action sound: no background music (BGM),
+  soundtrack, singing, dialogue, narration, ambience, or reverb tail.
 
 For a loop, require the last pose, root, and velocity to connect to the first
 without a still end hold. For a one-shot action, retain its complete motion and
@@ -121,7 +123,8 @@ Example brief for a right-facing heavy slash (adapt its timing and anatomy):
 > follow-through with delayed hair and cloth. Anticipation, contact, and
 > follow-through must have clearly different silhouettes at gameplay size.
 > Recover to the opening combat pose at the original root within the action
-> window. Keep one blade and one trailing arc; preserve limb lengths and facing.
+> window. Keep one blade with no slash arc or weapon trail; preserve limb lengths
+> and facing. No added visual effects or background music; dry action sound only.
 
 Use the hardest representative action as the pilot. If its motion is still too
 small, name the missing pose change in a regeneration note. If clearer textual
@@ -142,20 +145,34 @@ screen-right is the forward/enemy side and screen-left is the rear side.
 "Far plane" means deeper into the picture while remaining in the forward attack
 zone; "near plane" means toward the viewer while remaining in that same forward
 zone. Never substitute screen-left/screen-right for far-plane/near-plane motion.
-Require the character to keep facing the enemy and forbid the blade, contact,
-and trail from reversing the attack toward the rear. Contact and attack VFX
-remain in the forward zone; the brief may allow a weapon windup above or behind
+Require the character to keep facing the enemy and forbid the blade and contact
+from reversing the attack toward the rear. Contact remains in the forward zone;
+the brief may allow a weapon windup above or behind
 the body. Do not turn a forward-contact rule into a ban on torso rotation or
 useful anticipation.
 
 For sword actions, specify one blade, joined hands when appropriate, one contact
-direction, and one arc that trails the blade path. Explicitly forbid a mirrored
-upper/lower pair of arcs, detached effects, extra blades, a second attack, or an
-effect that arrives before the weapon.
+direction, and a readable physical blade path. Do not add slash arcs, weapon
+trails, mirrored effect pairs, extra blades, or an extra attack.
 
-## Effects
+## Clean visuals and action audio
 
-Bake short visual-only effects such as sparks, slash arcs, dust, or a break flash when they belong in the sprite silhouette. Keep gameplay projectiles, persistent hazards, hitboxes, and large scene effects separate in engine code.
+Generate only the character and required physical props against the matte.
+Do not add slash arcs, weapon trails, afterimages, speed lines, particles,
+sparks, dust, smoke, fire/glow effects, flashes, shockwaves, magic auras, screen
+effects, or motion blur. Keep expressive articulation, actual weapon motion,
+hair, and cloth movement. If the game needs VFX, keep them in separate engine
+layers rather than baking them into the character sprite.
+
+Explicitly forbid background music (BGM), soundtrack, singing, speech,
+narration, and ambience. Required audio consists only of synchronized dry action
+sound effects, such as footfalls and weapon swishes. The ban on **visual**
+effects does not disable those sounds. The CLI requests silence when audio is
+not required. Apply the same wording when composing prompts outside the CLI,
+including LibTV. Remove conflicting music/VFX requests from inherited example
+briefs before submission. These instructions do not automatically remove music
+or effects already present in a supplied/generated video; verify the result in
+review and regenerate a rejected source.
 
 ## Regeneration notes
 
@@ -167,7 +184,8 @@ When a candidate fails, feed the provider a short failure-specific note:
 - action timing was unclear;
 - hips/shoulders stayed static or key silhouettes were too similar at game size;
 - release was too slow relative to anticipation, or recovery reset a combo;
-- body or effect was clipped;
-- unwanted speech, music, or ambience appeared.
+- body or prop was clipped;
+- unwanted BGM, speech, or ambience appeared;
+- slash trails, particles, flashes, or other added visual effects appeared.
 
 Do not ask an image model to repair individual extracted frames. Regenerate the short video from the approved master.

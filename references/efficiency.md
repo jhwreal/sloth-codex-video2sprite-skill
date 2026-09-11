@@ -47,7 +47,8 @@ hard differences:
 - idle or locomotion for loop and identity stability;
 - attack for fast pose change and impact audio;
 - jump or dodge for large translation and framing;
-- VFX-heavy action for matte-edge contamination and transient synchronization.
+- an action with wide weapon reach and moving hair/cloth for matte-edge
+  contamination and action-sound synchronization, without added VFX or BGM.
 
 Submit the same pilot inputs to candidate models, mark them with
 `--purpose benchmark`, and compare them using the user's use/redo decision,

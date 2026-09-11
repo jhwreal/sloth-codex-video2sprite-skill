@@ -31,6 +31,7 @@ class PromptGuardTests(unittest.TestCase):
         self.assertIn("physically connected", prompt)
         self.assertIn("handle visibly seated in the grip", prompt)
         self.assertIn("no unrelated gun, holster, scabbard", prompt)
+        self.assertIn("No added visual effects (VFX)", prompt)
 
 
 class MotionContractTests(unittest.TestCase):
@@ -177,6 +178,37 @@ class MotionContractTests(unittest.TestCase):
         self.assertNotEqual(first["input_fingerprint"], second["input_fingerprint"])
         self.assertEqual(first["request"]["motion"], action["motion"])
         self.assertEqual(load_json(path)["prompt_sha256"], action["prompt_sha256"])
+
+    def test_no_bgm_or_vfx_reaches_provider_without_disabling_required_action_audio(self) -> None:
+        self._add("clean-action")
+        path = self.run_dir / "actions" / "clean-action" / "action.json"
+        with mock.patch.dict(
+            "os.environ", {"VIDEO2SPRITE_MAX_CANDIDATES_PER_ACTION": "6"}
+        ), mock.patch(
+            "video2sprite.submit_ark_video", return_value=self._provider_result()
+        ) as submit:
+            for style in video2sprite.MOTION_STYLES:
+                for audio_required in (False, True):
+                    with self.subTest(style=style, audio_required=audio_required):
+                        action = load_json(path)
+                        action["motion"]["style"] = style
+                        action["audio_required"] = audio_required
+                        atomic_write_json(path, action)
+                        candidate_id = f"{style}-{'audio' if audio_required else 'silent'}"
+                        video2sprite.command_submit(self._submit_args("clean-action", candidate_id))
+                        sent = submit.call_args.kwargs
+                        self.assertIn("no background music (BGM)", sent["prompt"])
+                        self.assertIn("No added visual effects (VFX)", sent["prompt"])
+                        self.assertIn("no slash arcs, weapon trails", sent["prompt"])
+                        self.assertEqual(sent["generate_audio"], audio_required)
+                        if audio_required:
+                            self.assertIn("Generate synchronized dry action sound effects only", sent["prompt"])
+                            self.assertNotIn("Keep the clip silent", sent["prompt"])
+                        else:
+                            self.assertIn("Keep the clip silent", sent["prompt"])
+                        candidate = load_json(path.parent / "candidates" / candidate_id / "candidate.json")
+                        self.assertEqual(candidate["request"]["prompt_sha256"], fingerprint(sent["prompt"]))
+            self.assertEqual(submit.call_count, 6)
 
     def test_terminal_and_travel_endings_do_not_force_original_root_reset(self) -> None:
         terminal = self._add("death", "--end-state", "hold", prompt="Fall and remain fallen")

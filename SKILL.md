@@ -19,6 +19,10 @@ For pixel ACT work, also read `references/prompting.md`: default to strong,
 distinct full-body combat poses and sharp timing contrast at gameplay size,
 with controlled idle motion. Fixed camera and canvas pivot do not freeze the
 body. Select root behavior and ending from the action's gameplay meaning.
+Generate clean character and prop motion: no BGM or soundtrack, and no added
+visual effects such as slash arcs, trails, particles, sparks, glow, or flashes.
+Keep synchronized dry action sound effects when audio is required. Apply these
+instructions to the master and every video-provider prompt, including LibTV.
 
 ## Non-negotiable media firewall
 
@@ -302,7 +306,9 @@ python "$SKILL_DIR/scripts/video2sprite.py" package \
   --engine generic
 ```
 
-Package only candidates whose QC is not `fail` and whose approval decision is `approved`. Keep gameplay projectiles, hitboxes, and persistent particles in engine code unless the user explicitly wants baked visual-only effects.
+Package only candidates whose QC is not `fail` and whose approval decision is `approved`.
+Keep character sprites free of baked visual effects. Gameplay projectiles,
+hitboxes, particles, and other game VFX belong in separate engine layers.
 
 ## Efficiency rules
 
@@ -337,8 +343,9 @@ Accept a final action only when:
   requested frame rate; only redundant holds may be omitted;
 - required audio exists, is not silent or clipped, and remains synchronized with the frame timings;
 - loop seams and event markers are reviewed when relevant;
-- identity, view, style, action readability, coherent VFX direction, and sound
+- identity, view, style, action readability, clean visuals without added VFX,
+  and action sound without BGM
   earn the user's “use this” decision;
 - forceful actions have distinct body silhouettes and timing contrast at final
-  gameplay pixel size, without relying on oversized VFX; idle remains controlled;
+  gameplay pixel size through body and prop motion alone; idle remains controlled;
 - the packaged action is tested in the target engine.

@@ -15,7 +15,8 @@ match and record:
 - anticipation, contact, follow-through, recovery, and event frame;
 - intended pose contrast at final gameplay pixel size, move weight, root
   behavior, and terminal state (recover, hold, or loop);
-- whether the effect is composite or must remain a separate engine layer;
+- clean character/prop output without added visual effects or BGM; any game
+  VFX remain a separate engine layer;
 - target-engine import mode, filtering, atlas-size limit, and animation name.
 
 Treat an existing action as a motion benchmark, not a template that overrides the
@@ -68,17 +69,17 @@ put gameplay hit-stop in the engine unless asset-level timing is deliberate.
 Never enlarge collision shapes or change the controller merely to match VFX.
 
 State the side-view direction, exact prop count, hand relationship, root behavior,
-and forbidden alternatives. For a sword slash, allow one blade and one trailing
-arc that originates from the moving blade. Reject mirrored arcs, simultaneous
-upper/lower arcs, a detached effect leading the weapon, extra blades, camera
-motion, scene cuts, or a second attack.
+and forbidden alternatives. For a sword slash, allow one blade with a readable
+physical path. Reject slash arcs, weapon trails, particles, flashes, extra blades,
+camera motion, scene cuts, or a second attack. Generate no added visual effects
+and no BGM; retain only required synchronized action sound effects.
 
 Do not confuse canvas direction with depth direction. For a right-facing
 side-view character, screen-right is forward toward the enemy and screen-left is
 behind the character. An inward/outward slash may alternate between the far and
 near picture planes, but every contact must remain in the forward attack zone.
-Reject any middle-stage turn that reverses facing or sends contact and attack
-VFX into the rear zone. Allow a brief-specified weapon windup above/behind the
+Reject any middle-stage turn that reverses facing or sends contact into the
+rear zone. Allow a brief-specified weapon windup above/behind the
 body and torso rotation within the side view; do not suppress anticipation to
 enforce a forward contact direction.
 
@@ -112,7 +113,7 @@ hit count in the brief; the whole source ends according to the final stage.
 Do not return to the opening idle pose between middle stages. Choose a readable
 bridge pose after each impact: the final frame of stage N must be the exact
 opening frame of stage N+1, with matching root, body momentum, sword position,
-hair, cloth, and effect state. The first stage may begin from combat idle; only
+hair, and cloth. The first stage may begin from combat idle; only
 the final stage should include the full recovery to that idle.
 
 If the player stops after a middle stage, leave the core attack clip unchanged.
@@ -127,7 +128,7 @@ impact only when one input intentionally owns a multi-hit move.
 ## 6. Use a dark connected matte
 
 Do not default to green. Choose a flat, unlit, dark hue that is absent from the
-character and VFX. For navy or black clothing, prefer a distinct dark aubergine
+character and props. For navy or black clothing, prefer a distinct dark aubergine
 or oxblood hue instead of a nearly identical blue-black.
 
 Use border-connected keying: remove only pixels close to the matte color that are
@@ -159,7 +160,7 @@ Evaluate bounds/baseline diagnostics against the move: crouches, recoil,
 extension, and collapse legitimately change them. These metrics cannot prove
 expressiveness. At actual gameplay size and speed, the user must be able to
 distinguish the action's key silhouettes and perceive the intended weight even
-without a large trail. Enlarged frame inspection alone is insufficient.
+through body and prop motion alone. Enlarged frame inspection alone is insufficient.
 
 The localhost workbench shows all extracted frames on the left, the action video
 at the upper right, and an enlarged selected frame at the lower right. Click a

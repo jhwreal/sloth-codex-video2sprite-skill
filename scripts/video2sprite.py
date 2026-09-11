@@ -85,6 +85,13 @@ RESAMPLING_MODES = ("nearest", "lanczos")
 MOTION_STYLES = ("pixel-act", "restrained", "natural")
 ROOT_MOTIONS = ("in-place", "planted", "travel")
 END_STATES = ("recover", "hold", "loop")
+CLEAN_VISUAL_DIRECTION = (
+    "No added visual effects (VFX). Show only the character and required physical props "
+    "against the extraction matte: no slash arcs, weapon trails, afterimages, speed lines, "
+    "particles, sparks, dust, smoke, fire effects, glow effects, flashes, shockwaves, "
+    "magic auras, screen effects, or motion blur. Express the action through body and "
+    "prop movement alone."
+)
 LIBTV_MEDIA_SUFFIXES = frozenset(
     {".mp4", ".mov", ".m4v", ".webm", ".png", ".jpg", ".jpeg", ".webp"}
 )
@@ -310,7 +317,8 @@ def _master_prompt(user_prompt: str, chroma_key: str) -> str:
         "gap, floating weapon, detached grip, or ambiguous hand-to-handle relationship. Include "
         "only equipment explicitly required by the brief: no unrelated gun, holster, scabbard, "
         "sheath, pouch, backpack, or secondary prop. No scenery, floor, cast shadow, text, UI, "
-        "border, motion sequence, sprite grid, or duplicate character."
+        "border, motion sequence, sprite grid, or duplicate character. "
+        f"{CLEAN_VISUAL_DIRECTION}"
     )
 
 
@@ -424,9 +432,13 @@ def _video_prompt(
     chroma = action.get("chroma") or {}
     key = chroma.get("key") or "#3f0050"
     sound = (
-        "Generate synchronized dry action sound effects only: no music, voice, ambience, or reverb."
-        if action.get("audio_required")
-        else "Do not add music, voice, ambience, or camera sounds."
+        "Audio: no background music (BGM), soundtrack, singing, voice, dialogue, narration, "
+        "ambience, reverb, or camera sounds. "
+        + (
+            "Generate synchronized dry action sound effects only."
+            if action.get("audio_required")
+            else "Keep the clip silent."
+        )
     )
     motion_text = _motion_direction(_motion_settings(action))
     window = action.get("window") or {}
@@ -461,7 +473,7 @@ def _video_prompt(
         "scenery, floor, cast shadow, text, subtitles, logo, watermark, UI, or extra characters. "
         f"Keep a perfectly flat, unlit, textureless solid {key} extraction matte for every frame; "
         "do not add a green screen, gradient, horizon, vignette, or colored rim light. "
-        f"{motion_text} {timing_text}{sound}"
+        f"{motion_text} {timing_text}{CLEAN_VISUAL_DIRECTION} {sound}"
     )
 
 
