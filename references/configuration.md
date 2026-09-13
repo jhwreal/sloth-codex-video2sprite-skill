@@ -18,6 +18,20 @@ record. Defaults are `pixel-act`, `in-place`, and `recover` (or `loop` when
 `prompting.md` for action-specific selection and `job-schema.md` for legacy
 compatibility and fingerprint behavior.
 
+## Video resolution policy
+
+Follow the 768-default and prior 2K-approval rule in `../SKILL.md` for every
+video generation path, including LibTV. Configuration precedence does not
+replace the user's explicit approval for 2K.
+
+The current Ark `submit --resolution` CLI accepts `480p`, `720p`, `1080p`,
+and `4k`, subject to model capabilities, and its parser defaults to `720p`.
+It has no `768` or `2K` argument. Do not pass invented values or relabel 720p
+as 768. Prefer a generation path that supports the requested 768 tier; when
+the selected provider/model cannot supply it, explain the limitation and agree
+on a supported alternative with the user before submitting. This is an agent
+workflow rule; the current CLI does not enforce the conversation approval.
+
 ## Credentials
 
 Environment variables have the highest credential priority:

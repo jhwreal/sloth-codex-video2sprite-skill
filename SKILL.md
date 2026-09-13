@@ -24,6 +24,20 @@ visual effects such as slash arcs, trails, particles, sparks, glow, or flashes.
 Keep synchronized dry action sound effects when audio is required. Apply these
 instructions to the master and every video-provider prompt, including LibTV.
 
+## Video generation resolution
+
+Default to the provider's **768** video-generation tier for pilots, retries,
+benchmarks, and final clips, including external generation paths such as LibTV.
+Before using **2K**, explain why 768 is insufficient for the specific action or
+output requirement and obtain the user's explicit approval for that scope.
+Do not submit a 2K task while approval is pending; existing presets, production
+mode, or general permission to generate videos do not constitute 2K approval.
+Record the selected tier, reason, and approval scope in the run's production notes.
+If the selected provider/model has no 768 tier, report that limitation and resolve
+the supported alternative with the user instead of silently upgrading or treating
+720p as 768. See `references/configuration.md` for the current Ark CLI limitation.
+This rule governs generated video resolution, not master-image or sprite-atlas size.
+
 ## Non-negotiable media firewall
 
 1. Never call conversational `imagegen` or `$imagegen` for this workflow. Invoke GPT Image 2 through `scripts/video2sprite.py generate-master`; the worker decodes Base64 internally and prints only bounded metadata.
