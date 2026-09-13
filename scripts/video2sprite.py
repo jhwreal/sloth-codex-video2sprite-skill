@@ -14,7 +14,6 @@ import re
 import shutil
 import sys
 import tempfile
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -40,7 +39,6 @@ from _v2s_common import (
     parse_size,
     require_executable,
     resolve_image_settings,
-    resolve_video_settings,
     run_command,
     safe_identifier,
     sanitize,
@@ -60,10 +58,7 @@ from _v2s_receipts import (
     write_libtv_receipt,
 )
 from _v2s_providers import (
-    download_provider_video,
     generate_openai_master,
-    poll_ark_video,
-    submit_ark_video,
 )
 
 
@@ -71,14 +66,7 @@ SCHEMA_VERSION = 1
 MAX_PROMPT_CHARS = 30_000
 SUPPORTED_ENGINES = ("generic", "godot")
 PROCESS_PROFILES = ("production", "draft")
-DEFAULT_CANDIDATE_BUDGET = 2
-DEFAULT_NETWORK_WORKERS = 4
 DEFAULT_LOCAL_WORKERS = 2
-MAX_ADVANCE_WAIT_SECONDS = 55.0
-DEFAULT_POLL_INTERVAL_SECONDS = 10.0
-ARK_REFERENCE_ROLES = ("first_frame", "reference_image")
-ARK_RESOLUTIONS = ("480p", "720p", "1080p", "4k")
-ARK_RATIOS = ("16:9", "4:3", "1:1", "3:4", "9:16", "21:9", "adaptive")
 KEY_MODES = ("border", "global")
 PLACEMENT_MODES = ("fixed", "fit-union")
 RESAMPLING_MODES = ("nearest", "lanczos")
@@ -86,11 +74,7 @@ MOTION_STYLES = ("pixel-act", "restrained", "natural")
 ROOT_MOTIONS = ("in-place", "planted", "travel")
 END_STATES = ("recover", "hold", "loop")
 CLEAN_VISUAL_DIRECTION = (
-    "No added visual effects (VFX). Show only the character and required physical props "
-    "against the extraction matte: no slash arcs, weapon trails, afterimages, speed lines, "
-    "particles, sparks, dust, smoke, fire effects, glow effects, flashes, shockwaves, "
-    "magic auras, screen effects, or motion blur. Express the action through body and "
-    "prop movement alone."
+    "No added visual effects (VFX): no slash trails, particles, glow or motion blur."
 )
 LIBTV_MEDIA_SUFFIXES = frozenset(
     {".mp4", ".mov", ".m4v", ".webm", ".png", ".jpg", ".jpeg", ".webp"}
@@ -146,15 +130,6 @@ def _archive_approval(path: Path) -> Optional[str]:
     archived = path.with_name(f"approval.stale.{stamp}.json")
     path.replace(archived)
     return archived.name
-
-
-def _candidate_id_from_model(model_alias: str) -> str:
-    if re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}", model_alias):
-        return model_alias
-    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", model_alias).strip("-._")[:64]
-    slug = slug or "model"
-    suffix = hashlib.sha256(model_alias.encode("utf-8")).hexdigest()[:8]
-    return f"{slug}-{suffix}"
 
 
 def _validate_chroma(
@@ -226,15 +201,6 @@ def _bounded_env_int(name: str, default: int, *, minimum: int, maximum: int) -> 
     return value
 
 
-def _candidate_budget() -> int:
-    return _bounded_env_int(
-        "VIDEO2SPRITE_MAX_CANDIDATES_PER_ACTION",
-        DEFAULT_CANDIDATE_BUDGET,
-        minimum=1,
-        maximum=20,
-    )
-
-
 def _processing_profile(raw: Optional[str]) -> str:
     profile = raw or os.getenv("VIDEO2SPRITE_PROCESS_PROFILE", "production")
     if profile not in PROCESS_PROFILES:
@@ -244,81 +210,15 @@ def _processing_profile(raw: Optional[str]) -> str:
     return profile
 
 
-def _remote_candidate_count(run_dir: Path, action: Dict[str, Any]) -> int:
-    count = 0
-    action_id = str(action["action_id"])
-    for candidate_id in action.get("candidates") or []:
-        path = candidate_dir(run_dir, action_id, str(candidate_id)) / "candidate.json"
-        if not path.is_file():
-            continue
-        candidate = load_json(path)
-        if candidate.get("provider") != "local":
-            count += 1
-    return count
-
-
-def _remote_pilot_gate(
-    run_dir: Path,
-    run: Dict[str, Any],
-    *,
-    requested_action_id: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Require one approved remote pilot before expanding to other actions."""
-    remote_action_ids = set()
-    approved_action_ids = set()
-    remote_candidate_count = 0
-    for record in _candidate_records(run_dir, run):
-        candidate = record.get("candidate")
-        if not candidate or candidate.get("provider") == "local":
-            continue
-        remote_candidate_count += 1
-        action_id = str(record["action_id"])
-        remote_action_ids.add(action_id)
-        path = candidate_dir(run_dir, action_id, str(record["candidate_id"]))
-        approval = _approval_state(path)
-        if approval == {"decision": "approved", "valid": True}:
-            approved_action_ids.add(action_id)
-    same_pilot_action = (
-        bool(requested_action_id) and requested_action_id in remote_action_ids
-    )
-    unlocked = (
-        remote_candidate_count == 0
-        or same_pilot_action
-        or bool(approved_action_ids)
-    )
-    return {
-        "unlocked": unlocked,
-        "remote_candidate_count": remote_candidate_count,
-        "pilot_action_ids": sorted(remote_action_ids),
-        "approved_pilot_action_ids": sorted(approved_action_ids),
-        "requested_action_is_existing_pilot": same_pilot_action,
-    }
-
-
-def _candidate_with_input_fingerprint(
-    run_dir: Path, action: Dict[str, Any], input_fingerprint: str
-) -> Optional[str]:
-    action_id = str(action["action_id"])
-    for candidate_id in action.get("candidates") or []:
-        path = candidate_dir(run_dir, action_id, str(candidate_id)) / "candidate.json"
-        if path.is_file() and load_json(path).get("input_fingerprint") == input_fingerprint:
-            return str(candidate_id)
-    return None
-
-
 def _master_prompt(user_prompt: str, chroma_key: str) -> str:
     return (
         f"{user_prompt}\n\n"
-        "Production constraints: create one canonical full-body 2D game character, "
-        "one fixed view, fully visible with comfortable margins, stable proportions and "
-        f"a flat unlit solid {chroma_key} extraction matte. No green screen unless that exact "
-        "color was explicitly requested. Every required held prop must be physically connected "
-        "to the correct hand or joined hands, with its handle visibly seated in the grip; no "
-        "gap, floating weapon, detached grip, or ambiguous hand-to-handle relationship. Include "
-        "only equipment explicitly required by the brief: no unrelated gun, holster, scabbard, "
-        "sheath, pouch, backpack, or secondary prop. No scenery, floor, cast shadow, text, UI, "
-        "border, motion sequence, sprite grid, or duplicate character. "
-        f"{CLEAN_VISUAL_DIRECTION}"
+        "One full-body game character in the requested view and style. Use the largest "
+        "practical subject scale with small safety margins; keep the body and required "
+        "props fully visible. Preserve the specified proportions and equipment; held "
+        "props must meet the correct hands at the grip. No extra equipment or characters. "
+        f"Uniform unlit {chroma_key} background; no scenery, floor, shadow, text, watermark "
+        f"or sprite grid. {CLEAN_VISUAL_DIRECTION}"
     )
 
 
@@ -351,248 +251,84 @@ def _motion_settings(action: Dict[str, Any]) -> Dict[str, str]:
 
 
 def _motion_direction(motion: Dict[str, str]) -> str:
+    """Emit only the selected motion style, movement and ending."""
     styles = {
-        "pixel-act": (
-            "Direct pose-led pixel ACT animation readable at the final gameplay pixel size. "
-            "For attacks and other forceful actions, exaggerate the whole-body key poses: "
-            "clear knee flexion and weight transfer, strong hip and shoulder rotation within "
-            "the approved side view, torso lean, and fully committed limb or weapon reach. "
-            "Separate anticipation, contact, and follow-through silhouettes; avoid wrist-only "
-            "or forearm-only motion. Use readable anticipation, a much faster release, a brief "
-            "contact emphasis, and substantial follow-through with delayed hair and cloth. "
-            "Do not distribute a strike at constant speed across the clip. For hit reactions, "
-            "show a decisive directional recoil; for death, commit to a clear collapse. "
-            "For locomotion, use distinct contact and passing poses with a readable stride. "
-            "For idle, keep controlled breathing and compact weight shifts; do not add attacks, "
-            "lunges, hops, or a large sway. Honor the brief's action weight, timing, and anatomy; "
-            "quick attacks need a shorter windup than heavy attacks. Exaggerate articulation "
-            "and pose spacing, not limb length or character size. Body motion must read without "
-            "VFX; larger trails, camera tricks, motion blur, or extra hits are not substitutes."
-        ),
-        "restrained": (
-            "Use restrained, deliberate pose changes appropriate to the described action. "
-            "Keep silhouettes and any contact readable at gameplay size, with economical "
-            "weight transfer and controlled secondary motion. Avoid added flourish or "
-            "overshoot; preserve the brief's intended action, reach, and timing."
-        ),
-        "natural": (
-            "Use natural, weight-driven body mechanics and the amplitude specified in the "
-            "brief. Coordinate hips, torso, shoulders, and limbs; keep the action readable "
-            "without imposing extreme stylized poses or additional flourishes."
-        ),
+        "pixel-act": "Use distinct whole-body silhouettes and clear timing contrast at gameplay size; match the brief's force and reach without changing anatomy.",
+        "restrained": "Use restrained, readable motion at the brief's intended reach and pace; no added flourish.",
+        "natural": "Use natural weight transfer and coordinated body movement at the brief's intended reach and pace.",
     }
     roots = {
-        "in-place": (
-            "Animate around the opening stage anchor with bounded pose displacement. "
-            "Allow weight shifts, crouches, torso rotation, lifted feet, and short lunges "
-            "when the action calls for them; do not pin both feet or freeze the pelvis. "
-            "Avoid accumulating locomotion across the canvas. The canvas pivot is a fixed "
-            "registration point, not a foot that must occupy the same pixel in every pose."
-        ),
-        "planted": (
-            "Keep the support contact specified in the brief planted at its stage anchor "
-            "while it bears weight. Articulate knees, hips, torso, arms, and the free limb "
-            "around that contact; planted support does not mean a rigid body."
-        ),
-        "travel": (
-            "Bake only the deliberate root travel described in the brief into the fixed "
-            "canvas. Allow the body to move to the specified destination; do not recenter "
-            "it or slide it back to the opening coordinate. Keep the full path inside frame."
-        ),
+        "in-place": "Stay near the starting area; allow the described steps, lifted feet, weight shifts and full body articulation.",
+        "planted": "Keep only the named support contact fixed while bearing weight; let the rest of the body move freely.",
+        "travel": "Travel in the specified direction and distance to the destination; do not slide back.",
     }
     if motion["end_state"] == "loop":
-        ending = (
-            "Complete a seamless cycle: the final pose, root position, and velocity connect "
-            "to the opening state. Do not insert a still end hold or a recovery to idle."
-        )
+        ending = "Loop seamlessly with matching pose, position, movement direction and speed; no pause at the join."
     elif motion["end_state"] == "hold":
-        ending = (
-            "Perform the requested action once and end in the terminal or combo bridge pose "
-            "specified in the brief. Do not return to the opening ready pose, resurrect a "
-            "fallen character, or undo a transformation. Preserve follow-through into a "
-            "bridge; any extra still padding belongs after the effective action window."
-        )
+        ending = "Finish in the specified terminal or next-action pose and position; no reset to idle."
     else:
         destination = (
-            "at the destination root"
-            if motion["root_motion"] == "travel"
-            else "at the original root"
+            "at the destination" if motion["root_motion"] == "travel" else "at the starting spot"
         )
-        ending = (
-            "Perform the requested action once, then recover with visible follow-through "
-            f"to the matching ready pose {destination}. Use a brief readable end hold; "
-            "do not repeat the action or snap back."
-        )
+        ending = f"Perform once, then follow through and recover to the ready pose {destination}; no repeat or snap back."
     return f"{styles[motion['style']]} {roots[motion['root_motion']]} {ending}"
 
 
 def _video_prompt(
     action: Dict[str, Any], *, reference_role: str = "first_frame"
 ) -> str:
-    chroma = action.get("chroma") or {}
-    key = chroma.get("key") or "#3f0050"
+    key = (action.get("chroma") or {}).get("key") or "#3f0050"
     sound = (
-        "Audio: no background music (BGM), soundtrack, singing, voice, dialogue, narration, "
-        "ambience, reverb, or camera sounds. "
-        + (
-            "Generate synchronized dry action sound effects only."
-            if action.get("audio_required")
-            else "Keep the clip silent."
-        )
+        "Synchronized dry action SFX only; no background music (BGM), speech or ambience."
+        if action.get("audio_required")
+        else "Silent clip; no background music (BGM) or other audio."
     )
     motion_text = _motion_direction(_motion_settings(action))
     window = action.get("window") or {}
-    window_start = float(window.get("start_seconds", 0))
-    window_duration = window.get("duration_seconds", action.get("duration_seconds"))
+    start = float(window.get("start_seconds", 0))
+    duration = window.get("duration_seconds", action.get("duration_seconds"))
     timing_text = ""
-    if window_duration is not None:
-        window_end = window_start + float(window_duration)
+    if duration is not None:
         timing_text = (
-            f"The effective action window is source time {window_start:g}s to {window_end:g}s. "
-            "Fit the complete requested motion and its specified ending inside this window. "
-            "Keep redundant padding outside it; do not stretch a fast action to fill the "
-            "provider's longer video duration. "
+            f"Complete the motion and ending within {start:g}s to {start + float(duration):g}s; "
+            "put any padding outside that window. "
         )
     reference_text = (
-        "Use input image 1 as the exact opening frame and preserve it as the character identity anchor."
+        "Use image 1 as the exact opening frame."
         if reference_role == "first_frame"
-        else "Use input image 1 only as the sole character identity and visual-style reference."
+        else "Use image 1 for identity and style only; do not inherit its empty margins."
     )
     return (
         f"{action['prompt']}\n\n"
-        f"{reference_text} "
-        "This is source footage for one 2D game-sprite action, not a cinematic shot. "
-        "Sprite-source constraints: exactly one full-body character; preserve identity, outfit, "
-        "palette, anatomical proportions, view, handedness, and props from the reference. "
-        "Preserve the character design, not the opening pose throughout the action. "
-        "Honor any explicitly requested form change in the action brief. "
-        "Lock the camera and framing as an orthographic side-view stage. Keep apparent "
-        "character scale stable while allowing articulated pose bounds to change. Keep the "
-        "complete body and intended weapon path visible without shrinking the character "
-        "during extreme poses. No zoom, pan, shake, perspective shift, cuts, "
-        "scenery, floor, cast shadow, text, subtitles, logo, watermark, UI, or extra characters. "
-        f"Keep a perfectly flat, unlit, textureless solid {key} extraction matte for every frame; "
-        "do not add a green screen, gradient, horizon, vignette, or colored rim light. "
+        f"{reference_text} Preserve character identity, proportions, outfit, props and facing "
+        "unless the brief explicitly requests a change. "
+        "One full-body 2D sprite action. Maximize subject size with a small safety margin "
+        "around the complete body, weapon path and intended travel. No tiny distant subject, "
+        "clipped extremities or reduced action reach. Fixed side-view camera and constant "
+        "character scale throughout; no zoom, pan or cuts. "
+        f"Uniform unlit {key} background; no scenery, floor, shadow, text or watermark. "
         f"{motion_text} {timing_text}{CLEAN_VISUAL_DIRECTION} {sound}"
     )
 
 
-def _effective_video_settings(
-    run: Dict[str, Any],
-    action: Dict[str, Any],
-    *,
-    provider: Optional[str],
-    model: Optional[str],
-    base_url: Optional[str],
-) -> Dict[str, Any]:
-    action_override = action.get("video") or {}
-    run_default = (run.get("defaults") or {}).get("video") or {}
-    return resolve_video_settings(
-        provider=provider or action_override.get("provider") or run_default.get("provider"),
-        model=model or action_override.get("model_alias") or run_default.get("model_alias"),
-        base_url=base_url or action_override.get("base_url") or run_default.get("base_url"),
-    )
-
-
-def _validate_known_video_request(
-    settings: Dict[str, Any],
-    action: Dict[str, Any],
-    args: argparse.Namespace,
-) -> None:
-    capabilities = settings.get("capabilities") or {}
-    duration = float(action["duration_seconds"])
-    duration_spec = capabilities.get("duration_seconds")
-    if isinstance(duration_spec, dict):
-        minimum = duration_spec.get("minimum")
-        maximum = duration_spec.get("maximum")
-        if isinstance(minimum, (int, float)) and duration < float(minimum):
-            raise Video2SpriteError(
-                f"Model {settings['model_alias']} requires duration >= {minimum} seconds"
-            )
-        if isinstance(maximum, (int, float)) and duration > float(maximum):
-            raise Video2SpriteError(
-                f"Model {settings['model_alias']} requires duration <= {maximum} seconds"
-            )
-        if duration_spec.get("integer_only") and not duration.is_integer():
-            raise Video2SpriteError(
-                f"Model {settings['model_alias']} requires an integer duration"
-            )
-    supported_resolutions = capabilities.get("resolutions")
-    if (
-        isinstance(supported_resolutions, list)
-        and args.resolution not in supported_resolutions
-    ):
-        raise Video2SpriteError(
-            f"Model {settings['model_alias']} does not support resolution {args.resolution}"
-        )
-    supported_ratios = capabilities.get("ratios")
-    if isinstance(supported_ratios, list) and args.ratio not in supported_ratios:
-        raise Video2SpriteError(
-            f"Model {settings['model_alias']} does not support ratio {args.ratio}"
-        )
-    supported_roles = capabilities.get("reference_roles")
-    if isinstance(supported_roles, list) and args.reference_role not in supported_roles:
-        raise Video2SpriteError(
-            f"Model {settings['model_alias']} does not support reference role {args.reference_role}"
-        )
-    if args.seed is not None and capabilities.get("supports_seed") is False:
-        raise Video2SpriteError(
-            f"Model {settings['model_alias']} does not support the seed parameter"
-        )
-
-
-def _resolve_submit_reference(
-    run_dir: Path,
-    run: Dict[str, Any],
-    args: argparse.Namespace,
-) -> tuple[Optional[str], Optional[Path], str]:
-    reference_path: Optional[Path] = None
-    reference_url = args.reference_url
-    if args.reference_file:
-        reference_path = Path(args.reference_file).expanduser().resolve()
-        if not reference_path.is_file():
-            raise Video2SpriteError(f"Reference image does not exist: {reference_path}")
-        expected_hash = str((run.get("master") or {}).get("sha256") or "")
-        actual_hash = sha256_file(reference_path)
-        if not expected_hash or actual_hash != expected_hash:
-            raise Video2SpriteError(
-                "Local reference image must exactly match the canonical run master hash"
-            )
-        return None, reference_path, str(reference_path)
-    if args.reference_url_env:
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", args.reference_url_env):
-            raise Video2SpriteError("Reference environment variable name is invalid")
-        reference_url = os.getenv(args.reference_url_env)
-        if not reference_url:
-            raise Video2SpriteError(
-                f"Reference environment variable is empty or missing: {args.reference_url_env}"
-            )
-    if not reference_url:
-        reference_url = os.getenv("VIDEO2SPRITE_REFERENCE_URL")
-    if not reference_url:
-        canonical = (run_dir / str(run["master"]["path"])).resolve()
-        raise Video2SpriteError(
-            "Provide --reference-file "
-            f"{canonical}, --reference-url, --reference-url-env, or VIDEO2SPRITE_REFERENCE_URL"
-        )
-    if reference_url.lstrip().lower().startswith("data:"):
-        raise Video2SpriteError(
-            "Use --reference-file for local media; inline data URLs are forbidden"
-        )
-    return reference_url, None, strip_url_query(reference_url)
+def _executable_ready(name: str) -> bool:
+    """Check that a configured media tool actually starts, not just its path."""
+    try:
+        executable = require_executable(name)
+        return run_command([executable, "-version"], check=False, timeout=5).returncode == 0
+    except Video2SpriteError:
+        return False
 
 
 def command_doctor(_args: argparse.Namespace) -> Dict[str, Any]:
     dependencies = {
         "pillow": importlib.util.find_spec("PIL") is not None,
         "numpy": importlib.util.find_spec("numpy") is not None,
-        "ffmpeg": shutil.which(os.getenv("VIDEO2SPRITE_FFMPEG", "ffmpeg")) is not None,
-        "ffprobe": shutil.which(os.getenv("VIDEO2SPRITE_FFPROBE", "ffprobe")) is not None,
+        "ffmpeg": _executable_ready(os.getenv("VIDEO2SPRITE_FFMPEG", "ffmpeg")),
+        "ffprobe": _executable_ready(os.getenv("VIDEO2SPRITE_FFPROBE", "ffprobe")),
     }
     image = resolve_image_settings()
-    video = resolve_video_settings()
     openai_source = credential_source("OPENAI_API_KEY")
-    ark_source = credential_source("ARK_API_KEY")
     return {
         "status": "ready" if all(dependencies.values()) else "missing_dependencies",
         "python": {
@@ -603,8 +339,6 @@ def command_doctor(_args: argparse.Namespace) -> Dict[str, Any]:
         "credentials": {
             "openai_configured": bool(credential_value("OPENAI_API_KEY")),
             "openai_source": openai_source,
-            "ark_configured": bool(credential_value("ARK_API_KEY")),
-            "ark_source": ark_source,
         },
         "defaults": {
             "image": {
@@ -612,28 +346,15 @@ def command_doctor(_args: argparse.Namespace) -> Dict[str, Any]:
                 "model_alias": image["model_alias"],
                 "model_id": image["model_id"],
             },
-            "video": {
-                "provider": video["provider"],
-                "model_alias": video["model_alias"],
-                "model_id": video["model_id"],
-                "capabilities": video["capabilities"],
-            },
         },
         "efficiency": {
             "process_profile": _processing_profile(None),
-            "network_workers": _bounded_env_int(
-                "VIDEO2SPRITE_NETWORK_WORKERS",
-                DEFAULT_NETWORK_WORKERS,
-                minimum=1,
-                maximum=16,
-            ),
             "local_workers": _bounded_env_int(
                 "VIDEO2SPRITE_LOCAL_WORKERS",
                 DEFAULT_LOCAL_WORKERS,
                 minimum=1,
                 maximum=8,
             ),
-            "max_candidates_per_action": _candidate_budget(),
         },
     }
 
@@ -653,31 +374,16 @@ def command_models(_args: argparse.Namespace) -> Dict[str, Any]:
                     },
                 }
             )
-    video_models: List[Dict[str, Any]] = []
-    for provider, spec in presets["video"]["providers"].items():
-        for alias, model in spec.get("models", {}).items():
-            video_models.append(
-                {
-                    "provider": provider,
-                    "alias": alias,
-                    "model_id": model["model_id"],
-                    "capabilities": {
-                        key: value for key, value in model.items() if key != "model_id"
-                    },
-                }
-            )
     return {
         "image_default": resolve_image_settings(),
-        "video_default": resolve_video_settings(),
         "image_models": image_models,
-        "video_models": video_models,
+        "video_generation": "external; use LibTV or attach a local video",
         "note": "Presets do not guarantee account entitlement; full model IDs are accepted.",
     }
 
 
 def command_configure_key(args: argparse.Namespace) -> Dict[str, Any]:
     credential_name = {
-        "ark": "ARK_API_KEY",
         "openai": "OPENAI_API_KEY",
     }[args.name]
     if args.from_env:
@@ -846,9 +552,6 @@ def command_init(args: argparse.Namespace) -> Dict[str, Any]:
     image_settings = resolve_image_settings(
         args.image_provider, args.image_model, args.image_base_url
     )
-    video_settings = resolve_video_settings(
-        args.video_provider, args.video_model, args.video_base_url
-    )
     run = {
         "schema_version": SCHEMA_VERSION,
         "character_id": args.character_id,
@@ -871,7 +574,6 @@ def command_init(args: argparse.Namespace) -> Dict[str, Any]:
         },
         "defaults": {
             "image": image_settings,
-            "video": video_settings,
         },
         "actions": [],
     }
@@ -884,11 +586,6 @@ def command_init(args: argparse.Namespace) -> Dict[str, Any]:
         "pivot": run["pivot"],
         "placement": run["placement"],
         "resampling": run["resampling"],
-        "video_default": {
-            "provider": video_settings["provider"],
-            "model_alias": video_settings["model_alias"],
-            "model_id": video_settings["model_id"],
-        },
     }
 
 
@@ -956,13 +653,6 @@ def command_add_action(args: argparse.Namespace) -> Dict[str, Any]:
     _validate_chroma(
         chroma_key, resolved_threshold, resolved_softness, chroma_mode
     )
-    video_override: Dict[str, Any] = {}
-    if args.provider or args.model or args.base_url:
-        video_override = resolve_video_settings(
-            provider=args.provider or (run.get("defaults") or {}).get("video", {}).get("provider"),
-            model=args.model or (run.get("defaults") or {}).get("video", {}).get("model_alias"),
-            base_url=args.base_url or (run.get("defaults") or {}).get("video", {}).get("base_url"),
-        )
     action = {
         "schema_version": SCHEMA_VERSION,
         "action_id": action_id,
@@ -986,7 +676,6 @@ def command_add_action(args: argparse.Namespace) -> Dict[str, Any]:
             "softness": resolved_softness,
             "mode": chroma_mode,
         },
-        "video": video_override,
         "candidates": [],
         "created_at": utc_now(),
         "updated_at": utc_now(),
@@ -1006,6 +695,24 @@ def command_add_action(args: argparse.Namespace) -> Dict[str, Any]:
         "duration_seconds": args.duration,
         "motion": motion,
         "audio_required": bool(args.audio_required),
+    }
+
+
+def command_export_prompt(args: argparse.Namespace) -> Dict[str, Any]:
+    run_dir = _runtime_dir(args.run_dir)
+    _load_run(run_dir)
+    action = _load_action(run_dir, args.action_id)
+    prompt = _video_prompt(action, reference_role=args.reference_role)
+    output = ensure_runtime_outside_skill(Path(args.output))
+    if output.exists():
+        raise Video2SpriteError(f"Prompt output already exists: {output}")
+    atomic_write_bytes(output, prompt.encode("utf-8"))
+    return {
+        "output_path": str(output),
+        "prompt_sha256": fingerprint(prompt),
+        "motion": _motion_settings(action),
+        "duration_seconds": action["duration_seconds"],
+        "audio_required": bool(action.get("audio_required")),
     }
 
 
@@ -1205,246 +912,6 @@ def command_libtv_download(args: argparse.Namespace) -> Dict[str, Any]:
         "proof_scope": summary["proof_scope"],
         "reference_audit": summary["reference_audit"],
     }
-
-
-def command_submit(args: argparse.Namespace) -> Dict[str, Any]:
-    run_dir = _runtime_dir(args.run_dir)
-    run = _load_run(run_dir)
-    action = _load_action(run_dir, args.action_id)
-    reference_url, reference_path, reference_summary = _resolve_submit_reference(
-        run_dir,
-        run,
-        args,
-    )
-    settings = _effective_video_settings(
-        run,
-        action,
-        provider=args.provider,
-        model=args.model,
-        base_url=args.base_url,
-    )
-    if settings["provider"] != "volcengine-ark":
-        raise Video2SpriteError(
-            f"Video provider adapter is not implemented: {settings['provider']}"
-        )
-    _validate_known_video_request(settings, action, args)
-    native_audio = settings["capabilities"].get("native_audio")
-    generate_audio = bool(action.get("audio_required")) and not args.no_audio
-    if action.get("audio_required") and args.no_audio and not args.allow_silent_model:
-        raise Video2SpriteError(
-            "This action requires audio; remove --no-audio or pass --allow-silent-model for a deliberate diagnostic"
-        )
-    if action.get("audio_required") and native_audio is False and not args.allow_silent_model:
-        raise Video2SpriteError(
-            f"Model {settings['model_alias']} does not support native audio; select another model"
-        )
-    candidate_id = safe_identifier(
-        args.candidate or _candidate_id_from_model(settings["model_alias"]),
-        "candidate ID",
-    )
-    destination_dir = candidate_dir(run_dir, args.action_id, candidate_id)
-    candidate_path = destination_dir / "candidate.json"
-    if candidate_path.is_file():
-        raise Video2SpriteError(
-            f"Candidate record already exists: {candidate_id}; inspect it first and use a new --candidate for an intentional new billed task"
-        )
-    request_prompt = _video_prompt(action, reference_role=args.reference_role)
-    input_fingerprint = fingerprint(
-        {
-            "master_sha256": run["master"]["sha256"],
-            "prompt_sha256": fingerprint(request_prompt),
-            "provider": settings["provider"],
-            "model_id": settings["model_id"],
-            "duration": action["duration_seconds"],
-            "resolution": args.resolution,
-            "ratio": args.ratio,
-            "seed": args.seed,
-            "generate_audio": generate_audio,
-            "reference_role": args.reference_role,
-            "watermark": bool(args.watermark),
-        }
-    )
-    duplicate = _candidate_with_input_fingerprint(run_dir, action, input_fingerprint)
-    if duplicate and not args.allow_duplicate_input:
-        raise Video2SpriteError(
-            f"Candidate {duplicate} already has the same generation fingerprint. "
-            "Reuse it, change an input, or pass --allow-duplicate-input for an intentional billed retry."
-        )
-    candidate_budget = _candidate_budget()
-    candidate_count = _remote_candidate_count(run_dir, action)
-    if candidate_count >= candidate_budget and not args.allow_over_budget:
-        raise Video2SpriteError(
-            f"Candidate budget reached for {args.action_id}: {candidate_count}/{candidate_budget}. "
-            "Benchmark only representative actions, or pass --allow-over-budget for an intentional extra billed task."
-        )
-    pilot_gate = _remote_pilot_gate(
-        run_dir,
-        run,
-        requested_action_id=args.action_id,
-    )
-    allow_unapproved_batch = bool(
-        getattr(args, "allow_unapproved_batch", False)
-    )
-    if not pilot_gate["unlocked"] and not allow_unapproved_batch:
-        pilot_actions = ", ".join(pilot_gate["pilot_action_ids"]) or "unknown"
-        raise Video2SpriteError(
-            "The paid pilot gate is locked. Review and approve a processed remote "
-            f"candidate for pilot action {pilot_actions} before submitting another action, "
-            "or pass --allow-unapproved-batch only for an explicitly authorized billed batch."
-        )
-    destination_dir.mkdir(parents=True, exist_ok=True)
-    candidate = {
-        "schema_version": SCHEMA_VERSION,
-        "candidate_id": candidate_id,
-        "provider": settings["provider"],
-        "model_alias": settings["model_alias"],
-        "model_id": settings["model_id"],
-        "base_url": settings["base_url"],
-        "capabilities": settings["capabilities"],
-        "purpose": args.purpose,
-        "reference": reference_summary,
-        "request": {
-            "reference_role": args.reference_role,
-            "motion": _motion_settings(action),
-            "prompt_sha256": fingerprint(request_prompt),
-            "resolution": args.resolution,
-            "ratio": args.ratio,
-            "duration_seconds": action["duration_seconds"],
-            "generate_audio": generate_audio,
-            "watermark": bool(args.watermark),
-        },
-        "input_fingerprint": input_fingerprint,
-        "pilot_gate_override": allow_unapproved_batch,
-        "seed": args.seed,
-        "status": "submitting",
-        "created_at": utc_now(),
-        "updated_at": utc_now(),
-    }
-    atomic_write_json(candidate_path, candidate)
-    _register_candidate(run_dir, action, candidate_id)
-    try:
-        result = submit_ark_video(
-            base_url=settings["base_url"],
-            model_id=settings["model_id"],
-            prompt=request_prompt,
-            reference_url=reference_url,
-            reference_path=reference_path,
-            reference_role=args.reference_role,
-            resolution=args.resolution,
-            ratio=args.ratio,
-            duration=float(action["duration_seconds"]),
-            generate_audio=generate_audio,
-            seed=args.seed,
-            watermark=bool(args.watermark),
-        )
-    except Exception:
-        candidate["status"] = "submission_failed"
-        candidate["updated_at"] = utc_now()
-        atomic_write_json(candidate_path, candidate)
-        raise
-    candidate.update(
-        {
-            "task_id": result["task_id"],
-            "request_id": result.get("request_id"),
-            "status": result["status"],
-            "submitted_at": result["submitted_at"],
-            "updated_at": utc_now(),
-        }
-    )
-    atomic_write_json(candidate_path, candidate)
-    return {
-        "run_dir": str(run_dir),
-        "action_id": args.action_id,
-        "candidate_id": candidate_id,
-        "provider": settings["provider"],
-        "model_alias": settings["model_alias"],
-        "model_id": settings["model_id"],
-        "task_id": result["task_id"],
-        "status": result["status"],
-        "candidate_budget": candidate_budget,
-        "candidate_budget_remaining": max(0, candidate_budget - candidate_count - 1),
-        "pilot_gate": {
-            **pilot_gate,
-            "override_used": allow_unapproved_batch,
-        },
-    }
-
-
-def command_poll(args: argparse.Namespace) -> Dict[str, Any]:
-    run_dir = _runtime_dir(args.run_dir)
-    _load_run(run_dir)
-    _load_action(run_dir, args.action_id)
-    candidate_id = safe_identifier(args.candidate, "candidate ID")
-    destination_dir = candidate_dir(run_dir, args.action_id, candidate_id)
-    candidate_path = destination_dir / "candidate.json"
-    candidate = load_json(candidate_path)
-    source = destination_dir / "source.mp4"
-    if source.is_file() and candidate.get("source", {}).get("sha256") == sha256_file(source):
-        return {
-            "run_dir": str(run_dir),
-            "action_id": args.action_id,
-            "candidate_id": candidate_id,
-            "status": candidate.get("status") or "ready",
-            "source_sha256": candidate["source"]["sha256"],
-            "cached": True,
-        }
-    if candidate.get("provider") != "volcengine-ark":
-        raise Video2SpriteError("Only Volcengine Ark remote candidates can be polled")
-    task_id = candidate.get("task_id")
-    if not task_id:
-        raise Video2SpriteError(f"Candidate has no provider task ID: {candidate_id}")
-    result = poll_ark_video(
-        base_url=str(candidate["base_url"]),
-        task_id=str(task_id),
-    )
-    candidate["status"] = result["status"]
-    candidate["request_id"] = result.get("request_id") or candidate.get("request_id")
-    candidate["last_polled_at"] = result["polled_at"]
-    candidate["updated_at"] = utc_now()
-    if result["status"] == "failed":
-        candidate["error"] = sanitize(result.get("error"))
-    if result.get("usage"):
-        candidate["usage"] = result["usage"]
-    downloaded: Optional[Dict[str, Any]] = None
-    if result["status"] == "succeeded":
-        video_url = result.get("video_url")
-        if not video_url:
-            candidate["status"] = "download_failed"
-            atomic_write_json(candidate_path, candidate)
-            raise Video2SpriteError("Provider task succeeded but returned no video URL")
-        downloaded = download_provider_video(str(video_url), source)
-        media_probe = probe_media(
-            source,
-            ffprobe=getattr(args, "ffprobe", None)
-            or os.getenv("VIDEO2SPRITE_FFPROBE", "ffprobe"),
-        )
-        candidate["source"] = {
-            "path": "source.mp4",
-            "origin": "provider",
-            "sha256": downloaded["sha256"],
-            "bytes": downloaded["bytes"],
-            "source_url": downloaded["source_url"],
-            "duration_seconds": media_probe["duration_seconds"],
-            "audio_present": media_probe["audio"]["present"],
-        }
-        candidate["status"] = "ready"
-        candidate["downloaded_at"] = utc_now()
-    atomic_write_json(candidate_path, candidate)
-    response: Dict[str, Any] = {
-        "run_dir": str(run_dir),
-        "action_id": args.action_id,
-        "candidate_id": candidate_id,
-        "task_id": task_id,
-        "status": candidate["status"],
-    }
-    if downloaded:
-        response.update(
-            {
-                "source_sha256": downloaded["sha256"],
-                "bytes": downloaded["bytes"],
-            }
-        )
-    return response
 
 
 def _processed_cache_result(
@@ -1710,16 +1177,10 @@ def _candidate_records(
     return records
 
 
-def _advance_once(args: argparse.Namespace) -> Dict[str, Any]:
-    """Make one nonblocking batch pass; never submit new provider work."""
+def command_advance(args: argparse.Namespace) -> Dict[str, Any]:
+    """Process attached local sources in one pass without provider network calls."""
     run_dir = _runtime_dir(args.run_dir)
     run = _load_run(run_dir)
-    network_workers = _worker_count(
-        args.network_workers,
-        "VIDEO2SPRITE_NETWORK_WORKERS",
-        DEFAULT_NETWORK_WORKERS,
-        maximum=16,
-    )
     local_workers = _worker_count(
         args.local_workers,
         "VIDEO2SPRITE_LOCAL_WORKERS",
@@ -1728,12 +1189,10 @@ def _advance_once(args: argparse.Namespace) -> Dict[str, Any]:
     )
     profile = _processing_profile(args.profile)
     errors: List[Dict[str, Any]] = []
-    poll_counts: Dict[str, int] = {}
     processed: List[Dict[str, Any]] = []
     process_success_count = 0
     discover_error_count = 0
 
-    poll_targets = []
     for record in _candidate_records(run_dir, run):
         candidate = record["candidate"]
         if candidate is None:
@@ -1751,51 +1210,17 @@ def _advance_once(args: argparse.Namespace) -> Dict[str, Any]:
         source = candidate_dir(
             run_dir, record["action_id"], record["candidate_id"]
         ) / "source.mp4"
-        terminal = candidate.get("status") in {
-            "failed",
-            "submission_failed",
-            "rejected",
-        }
-        if (
-            candidate.get("provider") == "volcengine-ark"
-            and candidate.get("task_id")
-            and not source.is_file()
-            and not terminal
-        ):
-            poll_targets.append(record)
-
-    def poll_one(record: Dict[str, Any]) -> Dict[str, Any]:
-        return command_poll(
-            argparse.Namespace(
-                run_dir=str(run_dir),
-                action_id=record["action_id"],
-                candidate=record["candidate_id"],
-                ffprobe=args.ffprobe,
-            )
-        )
-
-    if poll_targets:
-        with ThreadPoolExecutor(max_workers=network_workers) as executor:
-            future_map = {
-                executor.submit(poll_one, record): record for record in poll_targets
-            }
-            for future in as_completed(future_map):
-                record = future_map[future]
-                try:
-                    result = future.result()
-                    status = str(result.get("status") or "unknown")
-                    poll_counts[status] = poll_counts.get(status, 0) + 1
-                except Exception as exc:
-                    poll_counts["error"] = poll_counts.get("error", 0) + 1
-                    if len(errors) < 20:
-                        errors.append(
-                            {
-                                "stage": "poll",
-                                "action_id": record["action_id"],
-                                "candidate_id": record["candidate_id"],
-                                "error": sanitize(str(exc)),
-                            }
-                        )
+        if not source.is_file() and candidate.get("status") not in {
+            "failed", "submission_failed", "rejected"
+        }:
+            discover_error_count += 1
+            if len(errors) < 20:
+                errors.append({
+                    "stage": "source",
+                    "action_id": record["action_id"],
+                    "candidate_id": record["candidate_id"],
+                    "error": "Local source.mp4 is missing; obtain the video externally before processing. Remote polling is unavailable.",
+                })
 
     process_targets = []
     if args.process_ready:
@@ -1862,11 +1287,6 @@ def _advance_once(args: argparse.Namespace) -> Dict[str, Any]:
         "run_dir": str(run_dir),
         "status": "partial" if errors else "complete",
         "submitted_tasks": 0,
-        "poll": {
-            "targets": len(poll_targets),
-            "workers": network_workers,
-            "results": poll_counts,
-        },
         "process": {
             "enabled": bool(args.process_ready),
             "targets": len(process_targets),
@@ -1880,128 +1300,10 @@ def _advance_once(args: argparse.Namespace) -> Dict[str, Any]:
         "errors": errors,
         "error_count": (
             discover_error_count
-            + poll_counts.get("error", 0)
             + max(0, len(process_targets) - process_success_count)
         ),
-        "note": "advance never submits or creates a billed provider task",
+        "note": "advance processes local sources only; no remote generation, polling, or download",
     }
-
-
-def _pending_provider_count(summary: Dict[str, Any]) -> int:
-    statuses = summary.get("candidate_statuses") or {}
-    return sum(
-        int(statuses.get(name) or 0)
-        for name in ("submitting", "submitted", "queued", "running", "unknown")
-    )
-
-
-def _merge_advance_passes(
-    passes: Sequence[Dict[str, Any]],
-    *,
-    wait_requested: float,
-    elapsed: float,
-    stop_reason: str,
-) -> Dict[str, Any]:
-    final = dict(passes[-1])
-    poll_results: Dict[str, int] = {}
-    processed_sample: List[Dict[str, Any]] = []
-    errors: List[Dict[str, Any]] = []
-    poll_targets = 0
-    process_targets = 0
-    process_completed = 0
-    error_count = 0
-    for result in passes:
-        poll = result.get("poll") or {}
-        poll_targets += int(poll.get("targets") or 0)
-        for name, count in (poll.get("results") or {}).items():
-            poll_results[str(name)] = poll_results.get(str(name), 0) + int(count)
-        process = result.get("process") or {}
-        process_targets += int(process.get("targets") or 0)
-        process_completed += int(process.get("completed") or 0)
-        for item in process.get("sample") or []:
-            if len(processed_sample) < 20:
-                processed_sample.append(item)
-        for item in result.get("errors") or []:
-            if len(errors) < 20:
-                errors.append(item)
-        error_count += int(result.get("error_count") or 0)
-    final["poll"] = {
-        **(final.get("poll") or {}),
-        "targets": poll_targets,
-        "results": poll_results,
-    }
-    final["process"] = {
-        **(final.get("process") or {}),
-        "targets": process_targets,
-        "completed": process_completed,
-        "sample": processed_sample,
-        "sample_truncated": process_completed > len(processed_sample),
-    }
-    final["errors"] = errors
-    final["error_count"] = error_count
-    final["status"] = "partial" if error_count else "complete"
-    final["wait"] = {
-        "requested_seconds": round(wait_requested, 3),
-        "elapsed_seconds": round(elapsed, 3),
-        "passes": len(passes),
-        "stop_reason": stop_reason,
-        "pending_provider_tasks": _pending_provider_count(final),
-    }
-    return final
-
-
-def command_advance(args: argparse.Namespace) -> Dict[str, Any]:
-    """Advance in bounded wait windows so polling does not consume many agent turns."""
-    raw_wait = getattr(args, "wait_seconds", None)
-    wait_seconds = (
-        float(raw_wait)
-        if raw_wait is not None
-        else float(os.getenv("VIDEO2SPRITE_ADVANCE_WAIT_SECONDS", "0"))
-    )
-    raw_interval = getattr(args, "poll_interval", None)
-    poll_interval = (
-        float(raw_interval)
-        if raw_interval is not None
-        else float(
-            os.getenv(
-                "VIDEO2SPRITE_POLL_INTERVAL_SECONDS",
-                str(DEFAULT_POLL_INTERVAL_SECONDS),
-            )
-        )
-    )
-    if wait_seconds < 0.0 or wait_seconds > MAX_ADVANCE_WAIT_SECONDS:
-        raise Video2SpriteError(
-            f"Advance wait must be between 0 and {MAX_ADVANCE_WAIT_SECONDS:g} seconds"
-        )
-    if poll_interval < 2.0 or poll_interval > 30.0:
-        raise Video2SpriteError("Poll interval must be between 2 and 30 seconds")
-
-    started = time.monotonic()
-    deadline = started + wait_seconds
-    passes: List[Dict[str, Any]] = []
-    stop_reason = "nonblocking_pass"
-    while True:
-        result = _advance_once(args)
-        passes.append(result)
-        pending = _pending_provider_count(result)
-        if result.get("error_count"):
-            stop_reason = "error"
-            break
-        if pending == 0:
-            stop_reason = "no_pending_provider_tasks"
-            break
-        remaining = deadline - time.monotonic()
-        if wait_seconds <= 0.0 or remaining <= 0.0:
-            stop_reason = "wait_window_elapsed"
-            break
-        time.sleep(min(poll_interval, remaining))
-    elapsed = time.monotonic() - started
-    return _merge_advance_passes(
-        passes,
-        wait_requested=wait_seconds,
-        elapsed=elapsed,
-        stop_reason=stop_reason,
-    )
 
 
 def _approval_state(candidate_path: Path) -> Dict[str, Any]:
@@ -2122,31 +1424,6 @@ def command_status(args: argparse.Namespace) -> Dict[str, Any]:
                 approvals["invalid"] += 1
             else:
                 approvals["unreviewed"] += 1
-    remote_action_ids = set()
-    approved_remote_action_ids = set()
-    remote_candidate_count = 0
-    for action in actions_summary:
-        for candidate in action["candidates"]:
-            provider = candidate.get("provider")
-            if not provider or provider == "local":
-                continue
-            remote_candidate_count += 1
-            action_id = str(action["action_id"])
-            remote_action_ids.add(action_id)
-            if candidate.get("approval") == {
-                "decision": "approved",
-                "valid": True,
-            }:
-                approved_remote_action_ids.add(action_id)
-    pilot_gate = {
-        "unlocked": (
-            remote_candidate_count == 0 or bool(approved_remote_action_ids)
-        ),
-        "remote_candidate_count": remote_candidate_count,
-        "pilot_action_ids": sorted(remote_action_ids),
-        "approved_pilot_action_ids": sorted(approved_remote_action_ids),
-        "requested_action_is_existing_pilot": False,
-    }
     return {
         "run_dir": str(run_dir),
         "character_id": run["character_id"],
@@ -2156,7 +1433,6 @@ def command_status(args: argparse.Namespace) -> Dict[str, Any]:
         "candidate_statuses": candidate_statuses,
         "qc_statuses": qc_statuses,
         "approvals": approvals,
-        "pilot_gate": pilot_gate,
     }
 
 
@@ -2299,16 +1575,15 @@ def command_compare(args: argparse.Namespace) -> Dict[str, Any]:
         recommendation = {
             "model_alias": top["model_alias"],
             "model_id": top["model_id"],
-            "provisional": len(top["approved_actions"]) < 4,
+            "provisional": True,
             "basis": "human overall score, approved-action count, QC pass count, then generation speed",
-            "suggested_env": f"VIDEO2SPRITE_VIDEO_MODEL={top['model_alias']}",
         }
     return {
         "run_dir": str(run_dir),
         "scope": args.action_id or "all-actions",
         "ranking": ranking,
         "recommendation": recommendation,
-        "note": "A recommendation remains provisional until representative actions and real provider costs are reviewed.",
+        "note": "Historical quality ranking only; it does not establish cost effectiveness or require additional paid benchmarks.",
     }
 
 
@@ -2584,7 +1859,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "configure-key",
         help="Securely save a provider key in the fixed user-level credentials file",
     )
-    configure_key.add_argument("--name", choices=("ark", "openai"), required=True)
+    configure_key.add_argument("--name", choices=("openai",), required=True)
     configure_key.add_argument(
         "--from-env",
         help="Read the key from this environment variable instead of hidden terminal input",
@@ -2598,7 +1873,7 @@ def _build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--model")
     generate.add_argument("--base-url")
     generate.add_argument("--size", default="1024x1024")
-    generate.add_argument("--quality", choices=("auto", "low", "medium", "high"), default="high")
+    generate.add_argument("--quality", choices=("auto", "low", "medium", "high"), default="medium")
     generate.add_argument("--chroma-key", default="#3f0050")
     generate.add_argument("--overwrite", action="store_true")
     generate.set_defaults(handler=command_generate_master)
@@ -2632,9 +1907,6 @@ def _build_parser() -> argparse.ArgumentParser:
     initialize.add_argument("--image-provider")
     initialize.add_argument("--image-model")
     initialize.add_argument("--image-base-url")
-    initialize.add_argument("--video-provider")
-    initialize.add_argument("--video-model")
-    initialize.add_argument("--video-base-url")
     initialize.set_defaults(handler=command_init)
 
     add_action = subparsers.add_parser("add-action", help="Define one semantic action")
@@ -2680,10 +1952,18 @@ def _build_parser() -> argparse.ArgumentParser:
     add_action.add_argument("--chroma-mode", choices=KEY_MODES)
     add_action.add_argument("--chroma-threshold", type=float)
     add_action.add_argument("--chroma-softness", type=float)
-    add_action.add_argument("--provider")
-    add_action.add_argument("--model")
-    add_action.add_argument("--base-url")
     add_action.set_defaults(handler=command_add_action)
+
+    export_prompt = subparsers.add_parser(
+        "export-prompt", help="Write the action's visual prompt locally for external video generation"
+    )
+    export_prompt.add_argument("--run-dir", required=True)
+    export_prompt.add_argument("--action-id", required=True)
+    export_prompt.add_argument("--output", required=True)
+    export_prompt.add_argument(
+        "--reference-role", choices=("first_frame", "reference_image"), default="first_frame"
+    )
+    export_prompt.set_defaults(handler=command_export_prompt)
 
     libtv_download = subparsers.add_parser(
         "libtv-download",
@@ -2733,62 +2013,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     attach.set_defaults(handler=command_attach_video)
 
-    submit = subparsers.add_parser("submit", help="Submit an asynchronous image-to-video task")
-    submit.add_argument("--run-dir", required=True)
-    submit.add_argument("--action-id", required=True)
-    reference_group = submit.add_mutually_exclusive_group()
-    reference_group.add_argument("--reference-url")
-    reference_group.add_argument(
-        "--reference-file",
-        help="Read the canonical run master locally and encode it only inside the provider worker",
-    )
-    reference_group.add_argument(
-        "--reference-url-env",
-        help="Read the provider reference URL from this environment variable",
-    )
-    submit.add_argument("--candidate")
-    submit.add_argument("--provider")
-    submit.add_argument("--model")
-    submit.add_argument("--base-url")
-    submit.add_argument(
-        "--reference-role", choices=ARK_REFERENCE_ROLES, default="first_frame"
-    )
-    submit.add_argument("--resolution", choices=ARK_RESOLUTIONS, default="720p")
-    submit.add_argument("--ratio", choices=ARK_RATIOS, default="adaptive")
-    submit.add_argument("--seed", type=int)
-    submit.add_argument("--watermark", action="store_true")
-    submit.add_argument("--no-audio", action="store_true")
-    submit.add_argument("--allow-silent-model", action="store_true")
-    submit.add_argument(
-        "--purpose",
-        choices=("draft", "final", "benchmark"),
-        default="draft",
-        help="Record why this billed candidate is being generated",
-    )
-    submit.add_argument(
-        "--allow-over-budget",
-        action="store_true",
-        help="Intentionally exceed VIDEO2SPRITE_MAX_CANDIDATES_PER_ACTION",
-    )
-    submit.add_argument(
-        "--allow-duplicate-input",
-        action="store_true",
-        help="Intentionally repeat an identical billed generation fingerprint",
-    )
-    submit.add_argument(
-        "--allow-unapproved-batch",
-        action="store_true",
-        help="Intentionally submit a different action before any remote pilot is approved",
-    )
-    submit.set_defaults(handler=command_submit)
-
-    poll = subparsers.add_parser("poll", help="Poll and download one asynchronous video task")
-    poll.add_argument("--run-dir", required=True)
-    poll.add_argument("--action-id", required=True)
-    poll.add_argument("--candidate", required=True)
-    poll.add_argument("--ffprobe")
-    poll.set_defaults(handler=command_poll)
-
     process = subparsers.add_parser("process", help="Extract sprite frames, audio, preview, and QC")
     process.add_argument("--run-dir", required=True)
     process.add_argument("--action-id", required=True)
@@ -2810,7 +2034,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     advance = subparsers.add_parser(
         "advance",
-        help="Poll all pending tasks once and optionally process all ready candidates",
+        help="Inspect local sources and optionally process all ready candidates",
     )
     advance.add_argument("--run-dir", required=True)
     advance.add_argument(
@@ -2818,7 +2042,6 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also process every candidate that becomes or already is ready",
     )
-    advance.add_argument("--network-workers", type=int, help="Concurrent provider polls")
     advance.add_argument("--local-workers", type=int, help="Concurrent local media jobs")
     advance.add_argument(
         "--profile",
@@ -2827,16 +2050,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     advance.add_argument("--ffmpeg")
     advance.add_argument("--ffprobe")
-    advance.add_argument(
-        "--wait-seconds",
-        type=float,
-        help="Keep polling inside one bounded command for up to 55 seconds",
-    )
-    advance.add_argument(
-        "--poll-interval",
-        type=float,
-        help="Seconds between internal polling passes (2-30, default 10)",
-    )
     advance.set_defaults(handler=command_advance)
 
     status = subparsers.add_parser("status", help="Print a bounded run summary")

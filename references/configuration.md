@@ -1,106 +1,39 @@
 # Configuration
 
-## Precedence
+## Image settings and credentials
 
-Resolve provider and model settings in this order:
-
-1. CLI argument.
-2. Candidate, action, or run JSON.
-3. Environment variable.
-4. `assets/model-presets.json`.
-
-Do not silently replace an explicitly selected provider or model.
-
-Motion direction is action-local: `add-action --motion-style`, `--root-motion`,
-and `--end-state` are stored in `action.json.motion`; submission reads that
-record. Defaults are `pixel-act`, `in-place`, and `recover` (or `loop` when
-`--loop` is set). There are no motion environment overrides. See
-`prompting.md` for action-specific selection and `job-schema.md` for legacy
-compatibility and fingerprint behavior.
-
-## Video resolution policy
-
-Follow the 768-default and prior 2K-approval rule in `../SKILL.md` for every
-video generation path, including LibTV. Configuration precedence does not
-replace the user's explicit approval for 2K.
-
-The current Ark `submit --resolution` CLI accepts `480p`, `720p`, `1080p`,
-and `4k`, subject to model capabilities, and its parser defaults to `720p`.
-It has no `768` or `2K` argument. Do not pass invented values or relabel 720p
-as 768. Prefer a generation path that supports the requested 768 tier; when
-the selected provider/model cannot supply it, explain the limitation and agree
-on a supported alternative with the user before submitting. This is an agent
-workflow rule; the current CLI does not enforce the conversation approval.
-
-## Credentials
-
-Environment variables have the highest credential priority:
+Image configuration resolves as CLI argument, environment variable, then
+`assets/model-presets.json`. Video generation is external; configure its model
+in LibTV or the selected tool. Follow the 768 default and prior 2K approval rule
+in `../SKILL.md`.
 
 ```text
-OPENAI_API_KEY
-ARK_API_KEY
-```
-
-For reusable local access across Codex sessions, the Skill also reads this fixed
-user-level file when the corresponding environment variable is absent:
-
-```text
-~/.config/sloth-codex-video2sprite/credentials.env
-```
-
-This is the canonical persistent key location for the Skill. It is outside the
-source repository and installed Skill, so Git cannot track it. The repository
-also ignores `*.env` and `/credentials.env` as defense in depth.
-
-When a key is missing, store it with hidden interactive input:
-
-```bash
-python scripts/video2sprite.py configure-key --name ark
-python scripts/video2sprite.py configure-key --name openai
-```
-
-Or copy it from an existing local environment variable without exposing the
-value in process arguments:
-
-```bash
-python scripts/video2sprite.py configure-key \
-  --name ark \
-  --from-env SEEDANCE_API_KEY
-```
-
-The command intentionally has no raw `--key` argument. It creates the directory
-with mode `700`, writes the file atomically with mode `600`, preserves the other
-provider credential, and prints only bounded metadata. The file may contain
-`OPENAI_API_KEY` and `ARK_API_KEY`; an existing `SEEDANCE_API_KEY` is accepted
-as a read-time compatibility alias for Ark and becomes canonical
-`ARK_API_KEY` when saved through the command. The loader does not execute shell
-syntax, does not modify the process environment, and refuses links or files with
-group/world permissions. `doctor` reports only `environment`, `private_file`, or
-an unconfigured state—never the credential value.
-
-Never place credentials in a run, repository, Skill installation, output
-directory, prompt, command output, approval file, or committed `.env`. The
-private file is machine-local configuration and must remain outside Git.
-
-## Model and endpoint settings
-
-```text
+OPENAI_API_KEY=
 VIDEO2SPRITE_IMAGE_PROVIDER=openai
 VIDEO2SPRITE_IMAGE_MODEL=gpt-image-2
 VIDEO2SPRITE_IMAGE_BASE_URL=https://api.openai.com/v1
-
-VIDEO2SPRITE_VIDEO_PROVIDER=volcengine-ark
-VIDEO2SPRITE_VIDEO_MODEL=seedance-2.0
-VIDEO2SPRITE_VIDEO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-VIDEO2SPRITE_REFERENCE_URL=
 ```
 
-`VIDEO2SPRITE_VIDEO_MODEL` accepts a bundled alias or a full provider model ID. Availability is account-specific. Run `video2sprite.py models` to inspect aliases, then verify live availability with the user's provider account.
+New master generation defaults to `1024x1024` and `--quality medium`;
+`--size` and `--quality` can be overridden for a concrete output requirement.
+Reuse an approved master instead of calling generation again to adopt new defaults.
 
-Use `--model` for a one-off override. Use environment configuration only after a model comparison establishes a preferred default.
+The only credential managed by this CLI is `OPENAI_API_KEY`. The environment
+wins over the fixed machine-local store:
+`~/.config/sloth-codex-video2sprite/credentials.env`. Keep it outside the source,
+Skill installation and all run directories. Never print it or commit it.
 
-The CLI does not rewrite `.env` or shell configuration. `compare` prints a
-suggested environment assignment, and the user decides whether to adopt it.
+```bash
+python scripts/video2sprite.py configure-key --name openai
+# Or copy a key already set in the local environment:
+python scripts/video2sprite.py configure-key --name openai --from-env OPENAI_API_KEY
+```
+
+The command uses hidden terminal input or an environment variable, never a raw
+key argument. It creates a `700` directory and atomically writes a `600` file.
+The loader rejects symlinks and broad permissions, never executes shell syntax,
+and ignores unrecognized credential names. `doctor` reports configuration status
+and source only. Do not ask the user to paste keys into the conversation.
 
 ## Runtime settings
 
@@ -110,71 +43,44 @@ VIDEO2SPRITE_FFPROBE=ffprobe
 VIDEO2SPRITE_LOG_MAX_CHARS=4096
 VIDEO2SPRITE_HTTP_TIMEOUT=120
 VIDEO2SPRITE_PROCESS_PROFILE=production
-VIDEO2SPRITE_NETWORK_WORKERS=4
 VIDEO2SPRITE_LOCAL_WORKERS=2
-VIDEO2SPRITE_MAX_CANDIDATES_PER_ACTION=2
-VIDEO2SPRITE_ADVANCE_WAIT_SECONDS=0
-VIDEO2SPRITE_POLL_INTERVAL_SECONDS=10
 LIBTV_BIN=libtv
 ```
 
-The CLI must remain useful without credentials for `doctor`, `models`, `init`, `add-action`, `attach-video`, `process`, `status`, `review`, and `package`.
-`LIBTV_BIN` selects the official LibTV executable for `libtv-download`; the
-wrapper never reads or persists LibTV credentials and always supplies both
-`--without-ai-watermark` and `--vip`.
+`doctor` starts FFmpeg and FFprobe with a bounded `-version` probe; a broken
+executable or timeout is reported as unavailable before production work.
 
-`VIDEO2SPRITE_PROCESS_PROFILE` accepts `draft` or `production`. Draft keeps the same frame selection, matte removal, geometry, audio extraction, QC, and manifest semantics, but uses faster PNG compression and preview encoding. Packaging rejects draft artifacts.
+`doctor`, `models`, `init`, `add-action`, `export-prompt`, `attach-video`,
+`process`, `advance`, `status`, `review`, and `package` work without API keys.
+`libtv-download` uses the separately authenticated official LibTV CLI and always
+passes `--without-ai-watermark --vip`; it does not manage LibTV credentials.
 
 New runs default to a dark `#3f0050` matte with border-connected removal,
-fixed-canvas placement, and Lanczos resizing. Pixel-art projects should usually
-pass `--resampling nearest` and an explicit in-cell foot pivot such as
-`--pivot 144,144`. Legacy footage may opt into `--placement fit-union` and
-`--chroma-mode global`.
+fixed-canvas placement, and Lanczos resizing. Pixel art should usually use
+`--resampling nearest` and an explicit foot pivot such as `--pivot 144,144`.
+Legacy footage may use `--placement fit-union` and `--chroma-mode global`.
 
-`advance` uses the network and local worker limits. Four network workers are suitable for lightweight asynchronous status calls. Keep local workers at two unless the machine has enough CPU, memory, and storage bandwidth for concurrent FFmpeg/Pillow jobs.
+`VIDEO2SPRITE_PROCESS_PROFILE` accepts `draft` or `production`. Draft changes
+encoding speed only; frame selection, geometry, audio and QC remain the same.
+Normal single-candidate work can use production directly and be reviewed once.
+Only selected drafts need a production rebuild. Packaging requires production
+processing and current user approval.
 
-`VIDEO2SPRITE_ADVANCE_WAIT_SECONDS` defaults to `0` for a single nonblocking
-pass and is capped at `55`. Set it to `50`, or pass `--wait-seconds 50`, to
-collapse several provider polls into one bounded command result. Poll intervals
-must remain between 2 and 30 seconds.
+`advance --process-ready` processes ready local candidates in one pass using
+at most the selected local worker count (default two). It has no provider
+submission, polling, download, network-worker or wait-window options. Missing
+local sources are reported without modifying historical candidate records.
+Already downloaded historical videos remain eligible for processing and review.
 
-The candidate budget counts remote candidates already registered for an action, including failed attempts that may still have incurred provider work. Local attached videos do not consume the remote budget. `submit --allow-over-budget` is the explicit escape hatch for a planned representative benchmark.
+## Motion and external generation
 
-The CLI also rejects a new candidate whose generation fingerprint exactly
-matches an existing candidate. Use `--allow-duplicate-input` only for an
-intentional provider retry; it does not bypass the separate candidate budget.
+`add-action --motion-style`, `--root-motion`, and `--end-state` are action-local.
+Defaults are `pixel-act`, `in-place`, and `recover` (`loop` when `--loop` is set).
+See `prompting.md` and `job-schema.md` for motion and fingerprint semantics.
 
-The first remote action in a run becomes its paid pilot. Until one remote pilot
-candidate has a valid “approved” decision, `submit` rejects a different action.
-The same pilot action can still receive a retry or model comparison.
-`--allow-unapproved-batch` bypasses this run-level gate only when the user has
-explicitly authorized that billed batch.
-
-## Provider-readable references
-
-The preferred path for Ark is the canonical master already copied into the run:
-
-```bash
-python scripts/video2sprite.py submit \
-  --run-dir /absolute/path/to/run \
-  --action-id attack \
-  --reference-file /absolute/path/to/run/master/source.png
-```
-
-The worker requires the local file hash to equal `run.json`'s master hash, validates Ark's image size and dimensions locally, and encodes the image only inside the provider request. The data URL is released after the request and never enters stdout, run JSON, or persisted logs.
-
-Provider-readable references remain available when a local file is unsuitable. Supply one of:
-
-- a stable HTTPS object URL;
-- a short-lived signed URL, kept out of logs;
-- a provider asset URI such as `asset://...`.
-
-Do not paste signed URLs into agent messages. Pass them directly as a CLI argument or environment-sourced value. The worker redacts URL query strings from persisted summaries.
-
-For a short-lived signed reference, prefer `VIDEO2SPRITE_REFERENCE_URL` or
-`--reference-url-env YOUR_VARIABLE_NAME`; this keeps the signed URL out of CLI
-arguments and bounded command output.
-
-Direct `data:` URLs are rejected at the CLI and provider boundaries. Use
-`--reference-file` so the media firewall can keep encoded bytes inside the
-worker.
+`export-prompt` writes the effective visual prompt to a new local text file,
+with bounded metadata and its fingerprint on stdout. It never calls a provider
+or overwrites an existing output. Use that prompt with the canonical master in
+the external generator, retaining the selected video tier and any 2K approval
+in production notes. Pilot review, generation budgets, duplicate avoidance and
+2K approval are agent workflow requirements, not enforced by this local CLI.

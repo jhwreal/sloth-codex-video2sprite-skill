@@ -13,7 +13,7 @@ run/
     └── attack/
         ├── action.json
         └── candidates/
-            └── seedance-2.0/
+            └── libtv-pilot/
                 ├── candidate.json
                 ├── source.mp4
                 ├── source.receipt.json  # required only for LibTV origin
@@ -39,7 +39,7 @@ Runtime media belongs in the run, never in the Skill source.
 - output `frame_size`;
 - fixed-canvas placement, resampling mode, and explicit pivot;
 - default extraction-matte key, mode, threshold, and softness;
-- provider/model defaults;
+- image provider/model defaults;
 - action identifiers.
 
 ## Action
@@ -63,10 +63,10 @@ One action must describe one semantic motion. Do not put several attacks or came
 the existing loop flag and cannot accumulate `travel`. The CLI supplies `loop`
 from `--loop`; non-loops may select `--end-state recover|hold`. The detailed
 meaning and action examples are in `prompting.md`. Invalid motion settings are
-rejected before creating an action or submitting provider work.
+rejected before creating an action or exporting a prompt.
 
 Older actions without `motion` remain readable and keep their existing
-processing/review fingerprints. A new submission for such an action uses the
+processing/review fingerprints. A new prompt export for such an action uses the
 current prompt defaults (loop ending when its loop flag is set, otherwise
 recover); it does not regenerate or rewrite an existing candidate. Explicitly
 adding or changing `motion` changes action/processing fingerprints and makes
@@ -81,22 +81,17 @@ not return to idle; early combo termination uses a separate recovery branch.
 
 ## Candidate
 
-`candidate.json` records:
+`candidate.json` records the attached source origin, local source path and
+SHA-256, audio presence, candidate identity and timestamps. LibTV sources include
+a bounded `source.receipt.json` hash and summary proving both mandatory download
+flags, file identity and declared ancestry. No raw provider payload is stored.
 
-- provider, alias, resolved model ID, and model capabilities;
-- purpose (`draft`, `final`, or `benchmark`);
-- input hash and optional seed;
-- a bounded request summary with reference role, resolution, ratio, duration,
-  audio, watermark flags, resolved `motion`, and effective `prompt_sha256`;
-- a sanitized URL/asset reference or canonical local path, never inline media;
-- task ID and bounded status;
-- local source path and SHA-256;
-- explicit source origin (`local`, `provider`, or `libtv`);
-- for LibTV, a bounded `source.receipt.json` hash and summary proving both
-  mandatory download flags, artifact identity, and declared reference ancestry;
-- timestamps and state transitions;
-- whether the run-level paid-pilot gate was explicitly overridden;
-- no raw provider payload.
+Historical candidates may retain provider/model metadata, task IDs, request
+fingerprints and timing/usage information. These remain readable for comparison,
+processing and audit; the CLI does not submit, poll or download their tasks.
+Keep new external generation settings, video tier, reason and any 2K approval
+scope in production notes. `export-prompt` reports the effective prompt hash
+and resolved motion without creating a provider task or candidate.
 
 ## Manifest
 

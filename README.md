@@ -1,143 +1,49 @@
 # sloth-codex-video2sprite-skill
 
-一个对最终游戏资产直接负责、且不依赖其他精灵 Skill 的 2D 流水线：先确定角色母图，再用用户选择的视频模型生成单动作、带声音的短视频，最后完全在本地完成原帧率切帧、深色哑光去背、固定锚点、图集、音效、质检、结果选择和 Godot 打包。
+以尽量少的总成本交付尽量多的**合格游戏动作**：复用角色母图，通过 LibTV 等外部工具生成或接入本地视频，再本地切帧、去背、对齐、提取同步音效、审核和导出 Godot/通用图集。
 
-Seedream 属于图像生成方向；本项目的默认母图引擎是 GPT Image 2。Seedance 用于视频，但不硬编码为唯一选择。仓库内置 Seedance 2.0、2.0 Fast、1.5 Pro 和 1.0 Pro 别名，也允许直接传入账号实际可用的完整模型 ID。
+## 默认策略
 
-视频生成默认使用 **768 档位**，包括样片、重试、模型比较和成品，以及 LibTV 等外部生成路径。需要 **2K** 时，必须先说明当前动作或输出需求为什么不能用 768 满足，并获得用户对该范围的明确同意后再提交。供应商不支持 768 时，应说明限制并与用户确定替代档位，不得静默升级或把 720p 当作 768。当前 Ark CLI 的参数限制见 [`references/configuration.md`](references/configuration.md)。
+- 视频从 **768** 开始，主体尽量大，完整容纳动作，只留必要边距。更低档位须在代表样片上满足游戏尺寸下的细节要求；**2K 必须先说明理由并获得用户同意**。
+- 先复用已有母图、视频和兼容动作。新母图默认 `medium`；不为每个动作重画，也不为了换质量档位重做已可用的图。
+- 一段简短的动作描述，加一份自动追加的通用约束。只描述当前动作，不把所有动作和失败清单都塞进提示词。
+- 选最短够用时长，先验证一个代表样片，再扩展动作集。默认一个候选加一次针对性重试；反复失败先诊断。
+- 普通候选直接按 `production` 处理并审核一次；只有比较较大/多个候选时才考虑 `draft`。草稿只影响本地编码，不降低远端生成费用。
+- 先修窗口、去背、摆放和导出配置，再考虑重新生成。自然连续的连招可共享视频，但必须验证切分、衔接和声音，不拼接无关动作凑数量。
 
-## 核心目标
+完整执行流程见 [SKILL.md](SKILL.md)，成本与复用策略见 [efficiency.md](references/efficiency.md)，提示词写法见 [prompting.md](references/prompting.md)。
 
-- 高质量透明精灵动画，并保留动作原生音效。
-- 提示词明确不加 BGM、配乐或视觉特效（刀光、拖尾、残影、粒子、火花、烟尘、发光、闪屏等）；需要声音时只生成同步的动作音效。
-- 默认按像素 ACT 指导全身动作：强化蓄力、命中、收势的轮廓差异和快慢反差，待机仍保持克制；固定镜头不再等于锁死双脚。
-- 图片、视频、音频和 Base64 永远不进入 Codex 对话上下文。
-- 有效动作窗口可按原生 24fps 完整保留，不再把高速动作稀疏抽成几帧。
-- 默认不用绿幕；只删除与画面边缘连通的深色哑光，并清理半透明边缘串色。
-- 视频只解码一次；所有帧使用同一个固定画布变换和明确脚底锚点。
-- localhost 工作台左侧铺满逐帧图，右侧上方循环播放动作视频、下方放大显示当前点击的单帧；页面不放评分、备注或审核按钮，用户直接在对话里决定采用或重做。
-- 用小型指标比较多个模型，再由用户决定默认模型。
-- 整个 run 一次并发轮询和处理，避免每个动作来回操作。
-- 首个付费远程样片未确认前默认禁止跨动作批量提交，防止跑错项目后继续烧预算。
-- 输入未变化时直接命中处理缓存，不重复切帧、不让审核失效。
-- 同一 Image 2 母图请求会按指纹复用，不会因重复命令再次计费。
-- 固定画布在 FFmpeg 解帧时直接缩到目标尺寸，避免先写整套大分辨率 PNG。
-- 草稿/成品双档、默认两个远端候选上限，避免无边界重试。
+## 使用
 
-## 快速检查
+需要 Python 3.9+、Pillow、NumPy、FFmpeg 和 FFprobe：
 
 ```bash
 python scripts/video2sprite.py doctor
 python scripts/video2sprite.py models
 ```
 
-完整流程见 [`SKILL.md`](SKILL.md)。本 Skill 唯一默认的持久凭据位置是 `~/.config/sloth-codex-video2sprite/credentials.env`；它位于源码仓库、Codex 安装目录和输出目录之外，不能被 Git 跟踪。环境变量仍然优先。
-
-没有配置 Key 时，用隐藏输入保存：
+母图使用 GPT Image 2，只有缺少合适母图时才生成；视频在外部工具中生成。Skill 没有 Ark 提交、轮询或视频模型配置入口。
 
 ```bash
-python scripts/video2sprite.py configure-key --name ark
-```
-
-如果 Key 已在本地环境变量中，可安全迁移且不会把值放进命令参数：
-
-```bash
-python scripts/video2sprite.py configure-key \
-  --name ark \
-  --from-env SEEDANCE_API_KEY
-```
-
-`--name openai` 用于 GPT Image。命令自动创建 `700` 目录和 `600` 文件，原子写入、保留另一个供应商的 Key，并且绝不打印 Key。仓库中的 [`.env.example`](.env.example) 仅是空模板；真实值不得写入它。详见 [`references/configuration.md`](references/configuration.md)。
-
-火山任务可直接使用 run 内的规范母图：
-
-```bash
-python scripts/video2sprite.py submit \
-  --run-dir /absolute/path/to/run \
-  --action-id attack \
-  --reference-file /absolute/path/to/run/master/source.png \
-  --model seedance-2.0
-```
-
-本地图片只会在 provider worker 内临时编码；候选记录和终端输出仅保留路径、哈希与尺寸。
-
-## 像素 ACT 动作张力
-
-`add-action` 默认使用 `--motion-style pixel-act --root-motion in-place`：
-攻击强调膝、髋、躯干、肩臂共同发力，轻击保持短促，重击强调蓄力与收势，
-受击/死亡强调明确的身体姿势变化。它指导动作表现，不改变参考图的绘制风格。
-需要安静动作时可选 `restrained`，需要自然幅度时可选 `natural`。
-
-位移与结束姿势独立选择：
-
-- `in-place` 允许下蹲、重心移动、抬脚和短前冲，固定的是画布锚点。
-- `planted` 仅固定提示词指定的承重接触点，身体仍可充分运动。
-- `travel` 将指定的位移烘焙进精灵，需与引擎位移协调，避免重复移动。
-- 非循环默认 `--end-state recover`；死亡、变身和连招中间段用
-  `--end-state hold` 保留终态/衔接姿势。循环用 `--loop`，不另传结束状态。
-
-提示词会带上有效动作窗口，避免把短挥击均匀拉长到供应商要求的整段时长。
-母图先定角色在游戏里的像素高度，再为极端姿势和完整武器轨迹预留画布。
-验收按实际游戏尺寸和速度判断身体姿势及节奏，不能只看放大图或刀光大小。
-详见 [`references/prompting.md`](references/prompting.md)。
-
-设置会保存到动作和提交记录，并参与指纹校验；修改设置后旧审核不再有效。
-旧动作没有这些字段时仍可复用已有缓存，升级 Skill 不会自动重跑视频或产生费用。
-提示词的实际改善仍须以真实模型样片为准，离线测试不证明画面效果。
-
-## 模型选择
-
-默认值可通过环境变量设置：
-
-```bash
-export VIDEO2SPRITE_VIDEO_MODEL=seedance-2.0-fast
-```
-
-某次任务可用 `--model` 覆盖。只有在确实需要比较模型时，才为同一动作创建多个候选并运行：
-
-```bash
-python scripts/video2sprite.py compare --run-dir /absolute/path/to/run
-```
-
-`compare` 只读取模型、耗时、QC、采用/重做决定和可选的历史评分元数据，不读取媒体。它不会自动修改环境变量；少于四类代表动作时，推荐结果会明确标记为暂定。
-
-## 高效批量推进
-
-显式提交完需要的付费任务后，用一个命令推进整个 run：
-
-```bash
+python scripts/video2sprite.py export-prompt \
+  --run-dir /absolute/path/to/run --action-id attack \
+  --output /absolute/path/to/action-video-prompt.txt
 python scripts/video2sprite.py advance \
-  --run-dir /absolute/path/to/run \
-  --process-ready \
-  --profile draft \
-  --wait-seconds 50
-```
-
-它在最多 55 秒的窗口内并发轮询已存在的任务、下载已完成视频并处理就绪候选，只输出一次有界摘要，绝不会自动提交或产生新计费任务。相同输入再次执行 `process` 会返回 `cached: true`。查看整批候选只需一个本地工作台：
-
-```bash
+  --run-dir /absolute/path/to/run --process-ready --profile production
 python scripts/video2sprite.py review --run-dir /absolute/path/to/run
 ```
 
-草稿只用于模型和动作选择。最终候选需要用 `--profile production` 重建并再次确认，打包器会拒绝草稿产物。详细策略见 [`references/efficiency.md`](references/efficiency.md)。
+LibTV 视频先通过 `libtv-download`，固定带上 `--without-ai-watermark --vip`，再以 `--source-origin libtv --source-receipt ...` 接入。参考资产的 LibTV 上游也必须有凭据链。普通本地素材显式声明 `--source-origin local`。下载凭据不能替代画面水印审查。
 
-## 本地输出
+媒体和 Base64 不进入 Codex 对话。使用本地工作台查看，用户明确决定采用/重做。已批准成品才可打包；保留原片、帧率、动作窗口、统一尺度、音效和来源哈希。修改既有精灵时默认采用“工作中 → 已确认 → 游戏绑定”流程。
 
-每个候选会生成透明逐帧 PNG、`atlas.png`、`sfx.ogg`、带声 `preview.mp4`、`manifest.json`、`qc.json` 和哈希绑定的 `approval.json`。可导出通用包或 Godot `SpriteFrames` 资源。
+## 凭据与验证
 
-LibTV 来源必须先通过内置包装器下载。包装器固定同时传递
-`--without-ai-watermark --vip`，并生成绑定下载文件哈希的 receipt；随后
-`attach-video --source-origin libtv --source-receipt ...` 才允许进入处理链。
-普通本地视频则显式使用 `--source-origin local`。如果 LibTV 节点使用了来自
-LibTV 的上游参考资产，还必须用其原始 artifact + receipt 声明并验证祖先链；
-不得从无 receipt 或已见水印的候选抽帧后再次上传。receipt 只证明命令参数与
-文件身份，不代替最终机器检查和视觉水印审查。完整命令见
-[`SKILL.md`](SKILL.md)。
-
-## 开发验证
+只管理 `OPENAI_API_KEY`，环境变量优先，其次是工作区外的 `~/.config/sloth-codex-video2sprite/credentials.env`。使用隐藏输入或环境变量安全配置，详见 [configuration.md](references/configuration.md)。不提交凭据、媒体或运行输出。
 
 ```bash
+python scripts/video2sprite.py configure-key --name openai
 python -m unittest discover -s tests -v
 ```
 
-测试媒体在运行时程序化生成，不在仓库中保存二进制素材。真实 API 调用需要用户提供环境变量并明确授权；默认测试不产生 API 费用。
+离线测试使用程序生成素材，不调用付费 API。提示词变短不等于画面已经变好；实际效果、低档位适用性和每个合格动作的成本，须以真实样片和游戏内验收为准。

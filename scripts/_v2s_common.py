@@ -28,7 +28,7 @@ PRIVATE_CREDENTIALS_PATH = (
     Path.home() / ".config" / "sloth-codex-video2sprite" / "credentials.env"
 )
 PRIVATE_CREDENTIAL_NAMES = frozenset(
-    {"OPENAI_API_KEY", "ARK_API_KEY", "SEEDANCE_API_KEY"}
+    {"OPENAI_API_KEY"}
 )
 MAX_PRIVATE_CREDENTIALS_BYTES = 16 * 1024
 MEDIA_KEY_FRAGMENTS = (
@@ -113,7 +113,7 @@ def store_private_credential(
     path: Optional[Path] = None,
 ) -> Path:
     """Securely create or update one canonical user-level credential."""
-    if name not in {"OPENAI_API_KEY", "ARK_API_KEY"}:
+    if name not in {"OPENAI_API_KEY"}:
         raise Video2SpriteError(f"Unsupported credential name: {name}")
     normalized = value.strip()
     if not normalized:
@@ -136,11 +136,9 @@ def store_private_credential(
 
     credentials = load_private_credentials(resolved)
     credentials[name] = normalized
-    if name == "ARK_API_KEY":
-        credentials.pop("SEEDANCE_API_KEY", None)
     lines = [
         f"{candidate}={credentials[candidate]}"
-        for candidate in ("OPENAI_API_KEY", "ARK_API_KEY", "SEEDANCE_API_KEY")
+        for candidate in ("OPENAI_API_KEY",)
         if credentials.get(candidate)
     ]
     encoded = ("\n".join(lines) + "\n").encode("utf-8")
@@ -175,9 +173,9 @@ def store_private_credential(
 
 def credential_value(name: str, *, path: Optional[Path] = None) -> Optional[str]:
     """Resolve a credential with environment variables taking precedence."""
-    if name not in {"OPENAI_API_KEY", "ARK_API_KEY"}:
+    if name not in {"OPENAI_API_KEY"}:
         raise Video2SpriteError(f"Unsupported credential name: {name}")
-    names = (name, "SEEDANCE_API_KEY") if name == "ARK_API_KEY" else (name,)
+    names = (name,)
     for candidate in names:
         value = os.getenv(candidate)
         if value:
@@ -192,9 +190,9 @@ def credential_value(name: str, *, path: Optional[Path] = None) -> Optional[str]
 
 def credential_source(name: str, *, path: Optional[Path] = None) -> Optional[str]:
     """Report only where a credential came from, never its value."""
-    if name not in {"OPENAI_API_KEY", "ARK_API_KEY"}:
+    if name not in {"OPENAI_API_KEY"}:
         raise Video2SpriteError(f"Unsupported credential name: {name}")
-    names = (name, "SEEDANCE_API_KEY") if name == "ARK_API_KEY" else (name,)
+    names = (name,)
     if any(os.getenv(candidate) for candidate in names):
         return "environment"
     private = load_private_credentials(path)
@@ -539,52 +537,6 @@ def resolve_image_settings(
     }
 
 
-def resolve_video_settings(
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
-    base_url: Optional[str] = None,
-) -> Dict[str, Any]:
-    presets = load_presets()["video"]
-    resolved_provider = (
-        provider
-        or os.getenv("VIDEO2SPRITE_VIDEO_PROVIDER")
-        or presets["default_provider"]
-    )
-    provider_spec = presets["providers"].get(resolved_provider)
-    if not provider_spec:
-        raise Video2SpriteError(f"Unsupported video provider: {resolved_provider}")
-    requested_model = (
-        model
-        or os.getenv("VIDEO2SPRITE_VIDEO_MODEL")
-        or provider_spec["default_model"]
-    )
-    model_spec = provider_spec.get("models", {}).get(requested_model)
-    if model_spec is None:
-        for alias, candidate in provider_spec.get("models", {}).items():
-            if candidate.get("model_id") == requested_model:
-                requested_model = alias
-                model_spec = candidate
-                break
-    model_id = model_spec.get("model_id") if model_spec else (model or requested_model)
-    return {
-        "provider": resolved_provider,
-        "model_alias": requested_model,
-        "model_id": model_id,
-        "base_url": (
-            base_url
-            or os.getenv("VIDEO2SPRITE_VIDEO_BASE_URL")
-            or provider_spec["base_url"]
-        ).rstrip("/"),
-        "capabilities": (
-            {key: value for key, value in model_spec.items() if key != "model_id"}
-            if model_spec
-            else {
-                "native_audio": None,
-                "image_to_video": None,
-                "tier": "custom",
-            }
-        ),
-    }
 
 
 def http_json(

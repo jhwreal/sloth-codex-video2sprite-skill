@@ -13,7 +13,7 @@ class ContextPolicyTests(unittest.TestCase):
         for forbidden_tool in ("view_image", "read_thread", "imagegen"):
             self.assertIn(forbidden_tool, skill)
         self.assertIn("status --compact", skill)
-        self.assertIn("--wait-seconds", skill)
+        self.assertIn("advance --process-ready", skill)
 
     def test_skill_requires_libtv_receipts_without_overclaiming_visual_proof(self) -> None:
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")

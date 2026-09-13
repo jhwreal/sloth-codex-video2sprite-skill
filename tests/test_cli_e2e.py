@@ -152,7 +152,7 @@ class OfflineEndToEndTests(unittest.TestCase):
             "--chroma-softness",
             "36",
         )
-        self.assertEqual(initialized["video_default"]["model_alias"], "seedance-2.0")
+        self.assertNotIn("video_default", initialized)
 
         self._cli(
             "add-action",

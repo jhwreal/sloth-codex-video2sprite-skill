@@ -25,7 +25,7 @@ class ConfigureKeyCliTests(unittest.TestCase):
                     str(CLI),
                     "configure-key",
                     "--name",
-                    "ark",
+                    "openai",
                     "--from-env",
                     "VIDEO2SPRITE_TEST_KEY",
                 ],
@@ -51,7 +51,7 @@ class ConfigureKeyCliTests(unittest.TestCase):
                 / "credentials.env"
             )
             self.assertEqual(Path(result["path"]), expected)
-            self.assertEqual(result["credential_name"], "ARK_API_KEY")
+            self.assertEqual(result["credential_name"], "OPENAI_API_KEY")
             self.assertTrue(expected.is_file())
             if os.name == "posix":
                 self.assertEqual(expected.parent.stat().st_mode & 0o777, 0o700)
@@ -59,8 +59,7 @@ class ConfigureKeyCliTests(unittest.TestCase):
 
             doctor_environment = dict(environment)
             doctor_environment.pop("VIDEO2SPRITE_TEST_KEY", None)
-            doctor_environment.pop("ARK_API_KEY", None)
-            doctor_environment.pop("SEEDANCE_API_KEY", None)
+            doctor_environment.pop("OPENAI_API_KEY", None)
             checked = subprocess.run(
                 [sys.executable, str(CLI), "doctor"],
                 cwd=str(ROOT),
@@ -72,9 +71,9 @@ class ConfigureKeyCliTests(unittest.TestCase):
             )
             self.assertEqual(checked.returncode, 0)
             doctor = json.loads(checked.stdout)
-            self.assertTrue(doctor["credentials"]["ark_configured"])
+            self.assertTrue(doctor["credentials"]["openai_configured"])
             self.assertEqual(
-                doctor["credentials"]["ark_source"],
+                doctor["credentials"]["openai_source"],
                 "private_file",
             )
 

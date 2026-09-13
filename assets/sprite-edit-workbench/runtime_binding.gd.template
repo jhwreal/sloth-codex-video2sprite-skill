@@ -1,0 +1,83 @@
+extends RefCounted
+## Per-action overrides scoped to the rework's first Boss. Empty/invalid entries fall back.
+const ROOT := "res://challenges/age10_ninja_gaiden_sky_rework/boss_action_workbench/"
+const ACTIONS := ["idle-left", "march-left", "guard", "shield-bash", "guard-break", "hurt", "defeat"]
+
+static func read_bindings() -> Dictionary:
+	if not FileAccess.file_exists(ROOT + "game-binding.json"):
+		return {}
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(ROOT + "game-binding.json"))
+	if not parsed is Dictionary:
+		return {}
+	if String(parsed.get("character_id", "")) != "ch03_red_seal_clamp_shell":
+		return {}
+	var result := {}
+	var entries: Dictionary = parsed.get("actions", {})
+	for action in ACTIONS:
+		var value: Variant = entries.get(action)
+		if not value is Dictionary:
+			continue
+		var path := String(value.get("frames", ""))
+		if not path.begins_with(ROOT + "bound/" + action + "/") or ".." in path:
+			continue
+		var atlas_path := String(value.get("atlas_path", ""))
+		if not atlas_path.begins_with(ROOT + "bound/" + action + "/") or ".." in atlas_path:
+			continue
+		if not FileAccess.file_exists(atlas_path):
+			continue
+		if FileAccess.get_sha256(atlas_path) != String(value.get("atlas_sha256", "")):
+			continue
+		var image := Image.load_from_file(atlas_path)
+		if image == null or image.is_empty():
+			continue
+		var texture := ImageTexture.create_from_image(image)
+		var cells: Array = value.get("cells", [])
+		if cells.is_empty() or cells.size() > 360:
+			continue
+		var frames := SpriteFrames.new()
+		frames.remove_animation(&"default")
+		frames.add_animation(action)
+		frames.set_animation_speed(action, clampf(float(value.get("fps", 24.0)), 1.0, 120.0))
+		frames.set_animation_loop(action, bool(value.get("loop", false)))
+		var cells_valid := true
+		for cell in cells:
+			if not cell is Dictionary:
+				cells_valid = false
+				break
+			var rect := Rect2(float(cell.get("x", -1)), float(cell.get("y", -1)), float(cell.get("width", 0)), float(cell.get("height", 0)))
+			if not rect.has_area() or not Rect2(Vector2.ZERO, image.get_size()).encloses(rect):
+				cells_valid = false
+				break
+			var frame := AtlasTexture.new()
+			frame.atlas = texture
+			frame.region = rect
+			frames.add_frame(action, frame)
+		if not cells_valid:
+			continue
+		var entry: Dictionary = value.duplicate(true)
+		entry["resource"] = frames
+		entry["scale"] = clampf(float(entry.get("scale", 1.0)), 0.5, 2.0)
+		var valid := true
+		if action == "shield-bash":
+			var active: Array = entry.get("active_frames", [])
+			valid = not active.is_empty()
+			for frame in active:
+				valid = valid and int(frame) >= 0 and int(frame) < frames.get_frame_count(action)
+		if valid:
+			result[action] = entry
+	return result
+
+static func overlay(base: SpriteFrames, bindings: Dictionary) -> SpriteFrames:
+	if base == null or bindings.is_empty():
+		return base
+	var result := base.duplicate(true) as SpriteFrames
+	for action in bindings:
+		var source: SpriteFrames = bindings[action]["resource"]
+		if result.has_animation(action):
+			result.remove_animation(action)
+		result.add_animation(action)
+		result.set_animation_speed(action, source.get_animation_speed(action))
+		result.set_animation_loop(action, source.get_animation_loop(action))
+		for index in source.get_frame_count(action):
+			result.add_frame(action, source.get_frame_texture(action, index), source.get_frame_duration(action, index))
+	return result

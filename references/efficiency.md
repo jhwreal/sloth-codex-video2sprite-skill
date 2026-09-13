@@ -1,120 +1,87 @@
-# Efficiency and batching
+# Cost and throughput
 
-## Fast default path
+Optimize **total billed cost per accepted gameplay action**. Record known spend,
+accepted action count, retries and unresolved failures. If cost is unavailable,
+record tier, billed duration and attempt count as proxies; do not invent prices
+or claim that a shorter prompt itself reduces provider billing.
 
-1. Approve one canonical master and reuse its hash for the entire character.
-2. Define all known actions before starting provider work.
-3. Submit one draft candidate for the hardest representative pilot action.
-4. Advance and process that pilot in bounded polling windows:
+## Plan free reuse first
 
-   ```bash
-   python scripts/video2sprite.py advance \
-     --run-dir /absolute/path/to/run \
-     --process-ready \
-     --profile draft \
-     --wait-seconds 50
-   ```
+Map the requested action set to existing approved sources before generation:
 
-5. Review the pilot from the localhost workbench. Do not use `view_image`,
-   screenshots, `read_thread`, or a vision subagent.
-6. Only after the user adopts a remote pilot, submit one draft candidate per
-   remaining action close together. Every `submit` is an explicit billed action.
-7. Repeat the bounded pass later while submitted provider tasks remain queued or running.
-8. Review every ready candidate from one run-level reviewer:
+| Source | Reuse when |
+| --- | --- |
+| Approved master | Identity, view, equipment and framing still fit. No new image per action. |
+| Existing action video | Its motion/ending fit; a new window, matte setting or target atlas can be processed locally. |
+| Shared action asset | Two gameplay uses truly need the same visible motion; reuse pixels and set game events separately. |
+| Continuous combo | The requested sequence is naturally continuous and each input can be split at a clear bridge pose. |
+| Mirrored direction | Handedness, asymmetric design, lighting and gameplay allow it; verify in the engine. |
 
-   ```bash
-   python scripts/video2sprite.py review --run-dir /absolute/path/to/run
-   ```
+Do not reverse attacks/death/audio, call a static hold a new animation, or bundle
+unrelated moves into one clip just to increase the count. Linked sequences can
+reduce separate requests, but may cost more per attempt or be harder to get right;
+compare the actual provider's duration/billing unit before batching. Preserve
+source, provenance, complete movement and all existing approved versions.
 
-9. Regenerate only rejected actions. Reprocess selected finals with
-   `--profile production`, review them again, then package.
+## Use the least sufficient generation settings
 
-`advance` never submits provider work. Without `--wait-seconds` it makes one
-nonblocking pass; with it, the command polls internally for at most 55 seconds
-and emits one final bounded JSON summary. This replaces dozens of conversational
-poll turns without hiding an indefinitely running worker.
+1. Start at **768**, with the subject large enough for target sprite detail.
+   Fix composition before increasing pixel count. A lower supported tier may be
+   tried on the pilot when it can still satisfy the target; don't regenerate a
+   whole usable batch merely to benchmark settings.
+2. Choose the shortest supported clip that contains the action and its ending.
+   Do not stretch a quick strike to fill the provider minimum. Longer clips are
+   justified only by motion/continuity needs, not extra idle padding.
+3. Prefer a compatible economical model already proven for this visual style and
+   required sound. No compulsory multi-model or four-action benchmark. Use a
+   representative pilot covering the main risk (e.g. full weapon reach), then add
+   a different pilot only if the remaining actions have a materially new risk.
+4. A higher tier needs a specific unresolved source-detail problem. **2K always
+   requires a reason and explicit user approval for its scope.** Do not infer
+   approval from production mode or from a retry request.
+5. Use a suitable existing master; new image quality defaults to `medium`.
+   Smaller/cheaper settings only help if the identity and prop grip remain clear.
+   Reuse a successful image; a quality setting change is a new paid request.
 
-The CLI blocks a different remote action while the paid pilot gate is locked.
-Retries or model comparisons on the same pilot action remain possible.
-`--allow-unapproved-batch` is an explicit billed-risk override, not a normal
-fast path.
+Provider model, resolution, reference role and audio must be supported by the
+selected tool. Do not silently relabel tiers or invent an unsupported parameter.
+Keep source/anatomical scale and final game scale consistent when comparing.
 
-## Model pilot
+## Generate, verify, expand
 
-Do not test every model on every action. Select a small pilot that covers the
-hard differences:
+Generate one pilot and process at `production` for normal final-ready review.
+Review at actual gameplay size and speed. Once the user adopts it, generate the
+remaining independent actions with that recipe and use one run-level reviewer.
+Don't regenerate selected draft source videos as a mandatory final step.
 
-- idle or locomotion for loop and identity stability;
-- attack for fast pose change and impact audio;
-- jump or dodge for large translation and framing;
-- an action with wide weapon reach and moving hair/cloth for matte-edge
-  contamination and action-sound synchronization, without added VFX or BGM.
+Use `draft` only for meaningful local selection savings on large/multiple
+candidates. It changes local encoding, not provider tier or source detail.
+Chosen drafts need one production rebuild and current approval; ordinary
+production candidates do not need this extra pass.
 
-Submit the same pilot inputs to candidate models, mark them with
-`--purpose benchmark`, and compare them using the user's use/redo decision,
-optional legacy score metadata, QC, and elapsed generation time. The default
-budget is two remote candidates per action. Use
-`--allow-over-budget` only when the pilot intentionally needs more.
+`advance --process-ready` processes attached local videos concurrently (default
+two workers). It cannot submit, poll or download provider tasks. More workers can
+lose time to CPU/PNG contention. `status --compact` gives bounded progress.
 
-After a winner is selected, set `VIDEO2SPRITE_VIDEO_MODEL` for subsequent
-actions. Do not silently change the user's environment from the Skill.
+## Retry decision
 
-## Incremental processing cache
+- **Local issue:** wrong window, matte tolerance, placement, event or export;
+  adjust and reprocess existing source before buying another video.
+- **Source issue:** wrong identity, inadequate detail, clipped action, unwanted
+  motion/VFX/music or incorrect ending; make one specific correction.
+- **Ambiguous provider result:** check the existing task/node before retrying to
+  avoid duplicate billing. Keep its ID and input hashes in production notes.
 
-`generate-master` also has a billed-input cache. If the output PNG, its hash,
-prompt, model, size, quality, and matte match the provenance sidecar, an
-identical invocation returns `cached: true` without calling GPT Image 2.
+Default to one candidate plus one targeted retry per action within the user's
+budget. Stop expansion after repeated failure; diagnose and explain a revised
+approach before further paid attempts. An attractive optional refinement is not
+required when the accepted action already meets the game's target.
 
-The processing fingerprint covers:
+## Local reuse and provenance
 
-- source video SHA-256;
-- canonical master SHA-256;
-- action processing fingerprint;
-- output frame size and atlas columns;
-- draft or production profile;
-- processor schema version.
-
-When the fingerprint and required artifacts match, `process` returns
-`cached: true`. It does not decode media, rewrite files, or archive an existing
-approval. `--force` bypasses the cache and therefore invalidates prior review.
-
-Changing from draft to production is an intentional cache miss. Production
-must be reviewed after rebuilding; the packager rejects draft artifacts.
-
-## Concurrency
-
-- Network workers only perform independent provider status/download work.
-- Local workers run independent FFmpeg/Pillow pipelines in separate candidate
-  directories.
-- Fixed-placement decoding scales and pads to the logical sprite canvas inside
-  FFmpeg before temporary PNG extraction. A 1152×704 source targeting 288×176
-  therefore writes and keys one-sixteenth as many pixels per frame.
-- Defaults are four network workers and two local workers.
-- Increasing local concurrency can reduce throughput when PNG compression,
-  memory bandwidth, or storage is saturated. Measure before raising it.
-
-## Retry budget
-
-Regenerate only for a source-level failure: identity drift, wrong action,
-camera movement, unusable background, missing required sound, or failed human
-review. Do not regenerate for a deterministic extraction failure until the
-local configuration or source window has been corrected.
-
-Keep one normal candidate and at most one retry per action. Additional
-candidates require an explicit benchmark rationale. An exact generation
-fingerprint match is blocked even under the candidate budget; use
-`--allow-duplicate-input` only when repeating those inputs is intentional.
-
-## Conversation context
-
-The worker boundary alone is not enough if a task later reloads its media:
-
-- conversational `imagegen` returns encoded image results;
-- `view_image` and screenshots return image payloads;
-- `read_thread`, including calls configured with `includeOutputs=false`, may
-  still rehydrate structured image-generation results;
-- subagents and monitoring tasks can duplicate those payloads again.
-
-Use only local paths, hashes, `status --compact`, bounded `advance` output, the
-localhost reviewer, and small approval JSON. Never inspect generated media
-inside the agent conversation.
+Verified identical `generate-master` inputs reuse the output without another
+image request. Changed/unverifiable inputs require explicit `--overwrite`.
+Prompt/default updates do not authorize regenerating an approved master.
+`process` caches source/master/action/geometry/profile/receipt fingerprints.
+A hit must not rewrite output or invalidate approval; `--force` does both.
+Preserve original media and LibTV source/ancestor receipts for all derived uses.

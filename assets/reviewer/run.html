@@ -33,6 +33,8 @@
     .state-explicit_user_confirmation { color: #baf4cf; background: #17442c; }
     .state-legacy_compatibility { color: #d5dded; background: #39445a; }
     .state-game_bound { color: #ffe6a6; background: #5b4318; }
+    .state-process_approved { color: #baf4cf; background: #17442c; }
+    .state-process_pending { color: #d5dded; background: #39445a; }
     .new-marker { color: #8ac6ff; }
     #frames { align-content: start; display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; padding: 14px; overflow: auto; }
     .frame { margin: 0; min-width: 0; border: 1px solid #28334b; border-radius: 9px; overflow: hidden; background: #121a2b; cursor: pointer; }
@@ -92,7 +94,7 @@
     </div>
   </header>
   <main>
-    <nav id="action-navigation" aria-label="角色动作名称列表" hidden></nav>
+    <nav id="action-navigation" aria-label="动作名称列表" hidden></nav>
     <section id="frames" aria-label="全部关键帧"></section>
     <aside>
       <section id="action-meta" hidden aria-label="角色与游戏动作归属">
@@ -131,6 +133,10 @@
     const selectedGame = () => state.games.find(game => game.game_id === state.selectedGameId) || null;
     const gameEntries = () => (selectedGame()?.bound_action_ids || []).map(id => state.entryById.get(id)).filter(Boolean);
     const currentEntries = () => state.mode === "process" ? state.processEntries : state.mode === "character" ? state.characterEntries : gameEntries();
+    const characterSpriteLabel = entry => {
+      const index = state.characterEntries.findIndex(candidate => candidate.action_id === entry.action_id);
+      return index >= 0 ? `Sprite ${String(index + 1).padStart(2, "0")}` : "Sprite ?";
+    };
     const indexKey = () => state.mode === "game" ? `game:${state.selectedGameId}` : state.mode;
     const currentIndex = () => Number(state.indices[indexKey()] || 0);
     const setCurrentIndex = value => { state.indices[indexKey()] = value; };
@@ -214,10 +220,10 @@
       const navigation = byId("action-navigation");
       const entries = currentEntries();
       navigation.replaceChildren();
-      if (state.mode === "process") return;
       let previousGroup = "";
+      let selectedButton = null;
       for (const [index, entry] of entries.entries()) {
-        const group = entry.group || "其他";
+        const group = state.mode === "process" ? "工作中 Sprite" : (entry.group || "其他");
         if (group !== previousGroup) {
           const heading = document.createElement("div");
           heading.className = "action-group";
@@ -228,23 +234,41 @@
         const button = document.createElement("button");
         button.className = "action-link";
         button.classList.toggle("selected", index === currentIndex());
+        button.dataset.entryIndex = String(index);
+        if (index === currentIndex()) {
+          selectedButton = button;
+          button.setAttribute("aria-current", "true");
+        }
         button.type = "button";
         const name = document.createElement("span");
         name.className = "action-name";
-        name.textContent = entry.display_name || entry.action_id;
-        if (entry.new_this_round) {
+        name.textContent = state.mode === "process"
+          ? `Sprite ${String(index + 1).padStart(2, "0")}`
+          : `${characterSpriteLabel(entry)} · ${entry.display_name || entry.action_id}`;
+        if (state.mode !== "process" && entry.new_this_round) {
           const marker = document.createElement("span");
           marker.className = "new-marker";
           marker.textContent = " · 本轮";
           name.appendChild(marker);
         }
         const status = document.createElement("span");
-        const statusKind = state.mode === "game" ? "game_bound" : entry.admission_basis;
+        const processApproved = entry.approval?.decision === "approved";
+        const statusKind = state.mode === "process"
+          ? (processApproved ? "process_approved" : "process_pending")
+          : state.mode === "game" ? "game_bound" : entry.admission_basis;
         status.className = `action-state state-${statusKind}`;
-        status.textContent = state.mode === "game" ? "游戏已用" : (entry.admission_label || "角色动作");
+        status.textContent = state.mode === "process"
+          ? (processApproved ? "已确认" : "待确认")
+          : state.mode === "game" ? "游戏已用" : (entry.admission_label || "角色动作");
         const identifier = document.createElement("span");
         identifier.className = "action-id";
         identifier.textContent = entry.action_id;
+        button.title = state.mode === "process"
+          ? `${entry.action_id} · ${entry.candidate_id || ""}`
+          : `${characterSpriteLabel(entry)} · ${entry.action_id}`;
+        button.setAttribute("aria-label", state.mode === "process"
+          ? `Sprite ${index + 1}，${entry.action_id}，${status.textContent}`
+          : `${name.textContent}，${status.textContent}`);
         button.append(name, status, identifier);
         button.onclick = () => {
           setCurrentIndex(index);
@@ -252,6 +276,7 @@
         };
         navigation.appendChild(button);
       }
+      selectedButton?.scrollIntoView({block: "nearest", inline: "nearest"});
     }
 
     function renderActionMeta(entry) {
@@ -290,8 +315,8 @@
         ? `游戏动作（${game.display_name} · ${game.bound_action_ids.length}）`
         : "游戏动作（0）";
       byId("game-select").hidden = state.mode !== "game";
-      byId("action-navigation").hidden = state.mode === "process";
-      document.querySelector("main").classList.toggle("library-mode", state.mode !== "process");
+      byId("action-navigation").hidden = false;
+      document.querySelector("main").classList.add("library-mode");
     }
 
     async function render() {
@@ -309,7 +334,7 @@
       byId("counter").textContent = `${scope}：第 ${index + 1} 个 / 共 ${entries.length} 个`;
       const spriteName = state.mode === "process"
         ? `${entry.action_id} · ${entry.candidate_id}`
-        : `${entry.display_name || entry.action_id} · ${entry.action_id}`;
+        : `${characterSpriteLabel(entry)} · ${entry.display_name || entry.action_id} · ${entry.action_id}`;
       byId("title").textContent = spriteName;
       byId("title").title = spriteName;
       setVideo(entry.paths?.preview);

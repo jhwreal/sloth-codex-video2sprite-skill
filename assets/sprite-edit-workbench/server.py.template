@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Local Boss review, explicit selection, and challenge-only sprite binding."""
+import argparse, hashlib, json, secrets, shutil, sys, time, threading
+from pathlib import Path
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
+HERE=Path(__file__).resolve().parent
+ROOT=HERE.parents[2]
+RUN=ROOT/'build/qa-runs/red-seal-h3-20260908'
+SKILL=Path('<SKILL_DIR>/scripts')
+sys.path.insert(0,str(SKILL))
+from review_server import write_decision
+from video2sprite import _verify_approval
+NAMES={'idle-left':'待机','march-left':'行走','guard':'格挡','shield-bash':'盾击','guard-break':'破防／恢复','hurt':'受击','defeat':'退场'}
+TOKEN=secrets.token_urlsafe(24)
+MUTATION_LOCK=threading.Lock()
+def read(p,default=None):return json.loads(p.read_text()) if p.exists() else default
+def write(p,v):
+ p.parent.mkdir(parents=True,exist_ok=True);t=p.with_suffix(p.suffix+'.tmp');t.write_text(json.dumps(v,ensure_ascii=False,indent=2)+'\n');t.replace(p)
+def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
+def candidates():
+ out={}
+ for p in sorted(RUN.glob('run*/actions/*/candidates/*/manifest.json')):
+  m=read(p);a=m['action_id'];cid=p.parent.relative_to(RUN).as_posix()
+  if a in NAMES:out[cid]=(p.parent,m)
+ return out
+def url(p):return '/'+p.relative_to(ROOT).as_posix()
+def state():
+ selection=read(RUN/'selections.json',{});entries=[]
+ for cid,(p,m) in candidates().items():
+  approval=read(p/'approval.json',{});valid=False
+  if approval.get('decision')=='approved':
+   try:_verify_approval(p);valid=True
+   except Exception:pass
+  entries.append({'id':cid,'action':m['action_id'],'candidate':m['candidate_id'],'fps':m['fps'],'count':m['frame_count'],'atlas':url(p/'atlas.png'),'preview':url(p/'preview.mp4'),'source':url(p/'source.mp4'),'frames':[f['cell'] for f in m['frames']],'qc':read(p/'qc.json'),'confirmed':valid,'rejected':approval.get('decision')=='rejected','selection':selection.get(cid),'scale':768/552 if cid.startswith('run-safe/') else 1.0})
+ return {'token':TOKEN,'entries':entries,'budget':read(RUN/'budget.json',{}),'binding':read(HERE/'game-binding.json',{'actions':{}}),'names':NAMES}
+def select(cid,payload):
+ p,m=candidates()[cid];start=int(payload['start']);end=int(payload['end']);fps=float(payload['fps']);impact=int(payload.get('impact',start));active_end=int(payload.get('active_end',impact))
+ if not 0<=start<=end<m['frame_count'] or not 1<=fps<=120:raise ValueError('帧范围或播放速度无效')
+ if m['action_id']=='shield-bash' and not start<=impact<=active_end<=end:raise ValueError('命中帧必须位于所选动作范围内')
+ write_decision(p,action_id=m['action_id'],candidate_id=m['candidate_id'],decision='approved',note='User explicitly confirmed this candidate in the Boss workbench, including smoothness, identity and absence of baked watermark.')
+ choices=read(RUN/'selections.json',{});choices[cid]={'start':start,'end':end,'fps':fps,'loop':bool(payload.get('loop',False)),'impact':impact,'active_end':active_end,'manifest_sha256':sha(p/'manifest.json')};write(RUN/'selections.json',choices)
+def bind(cid):
+ p,m=candidates()[cid];_verify_approval(p);s=read(RUN/'selections.json',{}).get(cid)
+ if not s or s['manifest_sha256']!=sha(p/'manifest.json'):raise ValueError('请先确认当前候选与帧范围')
+ action=m['action_id'];identity=hashlib.sha256((json.dumps(s,sort_keys=True)+sha(p/'atlas.png')).encode()).hexdigest()[:12];dest=HERE/'bound'/action/identity;dest.mkdir(parents=True,exist_ok=True);shutil.copyfile(p/'atlas.png',dest/'atlas.png')
+ frames=m['frames'][s['start']:s['end']+1];lines=[f'[gd_resource type="SpriteFrames" load_steps={len(frames)+2} format=3]','',f'[ext_resource type="Texture2D" path="res://{(dest/"atlas.png").relative_to(ROOT).as_posix()}" id="1"]','']
+ for i,f in enumerate(frames):
+  c=f['cell'];lines += [f'[sub_resource type="AtlasTexture" id="Frame_{i}"]','atlas = ExtResource("1")',f'region = Rect2({c["x"]}, {c["y"]}, {c["width"]}, {c["height"]})','']
+ lines+=['[resource]','animations = [{','"frames": ['+', '.join('{"duration": 1.0, "texture": SubResource("Frame_%d")}'%i for i in range(len(frames)))+'],','"loop": '+str(s['loop']).lower()+',',f'"name": &"{action}",',f'"speed": {s["fps"]}','}]']
+ (dest/'sprite_frames.tres').write_text('\n'.join(lines)+'\n');shutil.copyfile(p/'source.receipt.json',dest/'source.receipt.json');shutil.copyfile(p/'approval.json',dest/'approval.json')
+ b=read(HERE/'game-binding.json',{'schema_version':1,'character_id':'ch03_red_seal_clamp_shell','actions':{}})
+ b['actions'][action]={'candidate':cid,'frames':'res://'+(dest/'sprite_frames.tres').relative_to(ROOT).as_posix(),'scale':768/552 if cid.startswith('run-safe/') else 1.0,'active_frames':list(range(s['impact']-s['start'],s['active_end']-s['start']+1)) if action=='shield-bash' else [],'selection':s,'atlas_path':'res://'+(dest/'atlas.png').relative_to(ROOT).as_posix(),'cells':[f['cell'] for f in frames],'fps':s['fps'],'loop':s['loop'],'atlas_sha256':sha(dest/'atlas.png')};write(HERE/'game-binding.json',b)
+class Handler(SimpleHTTPRequestHandler):
+ def __init__(self,*a,**kw):super().__init__(*a,directory=str(ROOT),**kw)
+ def do_GET(self):
+  if urlparse(self.path).path=='/boss-api/state':self.send_json(state());return
+  super().do_GET()
+ def send_json(self,v,code=200):
+  data=json.dumps(v,ensure_ascii=False).encode();self.send_response(code);self.send_header('Content-Type','application/json');self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
+ def do_POST(self):
+  with MUTATION_LOCK:
+   self.handle_post()
+ def handle_post(self):
+  try:
+   if self.headers.get('X-Boss-Token')!=TOKEN:raise ValueError('请刷新工作台后操作')
+   origin=self.headers.get('Origin','');allowed='http://'+self.headers.get('Host','')
+   if origin and origin!=allowed:raise ValueError('仅允许本地同源工作台操作')
+   length=int(self.headers.get('Content-Length','0'))
+   if length>8192:raise ValueError('请求过大')
+   payload=json.loads(self.rfile.read(length));cid=payload.get('id');op=urlparse(self.path).path
+   if op=='/boss-api/confirm':select(cid,payload)
+   elif op=='/boss-api/bind':bind(cid)
+   elif op=='/boss-api/unbind':
+    action=payload['action']
+    if action not in NAMES:raise ValueError('未知动作')
+    b=read(HERE/'game-binding.json',{'actions':{}});b['actions'].pop(action,None);write(HERE/'game-binding.json',b)
+   else:raise ValueError('未知操作')
+   self.send_json({'ok':True})
+  except Exception as e:self.send_json({'error':str(e)[:300]},400)
+if __name__=='__main__':
+ parser=argparse.ArgumentParser();parser.add_argument('--port',type=int,default=4188);a=parser.parse_args();print(f'Boss workbench http://127.0.0.1:{a.port}/challenges/age10_ninja_gaiden_sky_rework/boss_action_workbench/index.html',flush=True);ThreadingHTTPServer(('127.0.0.1',a.port),Handler).serve_forever()

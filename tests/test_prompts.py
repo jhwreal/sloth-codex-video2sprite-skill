@@ -5,7 +5,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,10 +27,11 @@ class PromptGuardTests(unittest.TestCase):
             "#3f0050",
         )
 
-        self.assertIn("physically connected", prompt)
-        self.assertIn("handle visibly seated in the grip", prompt)
-        self.assertIn("no unrelated gun, holster, scabbard", prompt)
+        self.assertIn("held props must meet the correct hands at the grip", prompt)
+        self.assertIn("No extra equipment or characters", prompt)
         self.assertIn("No added visual effects (VFX)", prompt)
+        self.assertIn("largest practical subject scale with small safety margins", prompt)
+        self.assertNotIn("comfortable margins", prompt)
 
 
 class MotionContractTests(unittest.TestCase):
@@ -66,20 +66,6 @@ class MotionContractTests(unittest.TestCase):
         self.assertEqual(result["motion"], action["motion"])
         return action
 
-    def _submit_args(self, action_id: str, candidate: str):
-        return self.parser.parse_args(
-            [
-                "submit", "--run-dir", str(self.run_dir),
-                "--action-id", action_id, "--candidate", candidate,
-                "--reference-url", "https://assets.example/master.png",
-            ]
-        )
-
-    def _provider_result(self):
-        return {
-            "task_id": "synthetic-task", "status": "queued",
-            "submitted_at": "2026-09-11T00:00:00Z",
-        }
 
     def test_defaults_and_explicit_action_endings_survive_save_load(self) -> None:
         cases = (
@@ -117,111 +103,138 @@ class MotionContractTests(unittest.TestCase):
             self.assertFalse((self.run_dir / "actions" / "invalid").exists())
             self.assertEqual(load_json(self.run_dir / "run.json")["actions"], [])
 
-    def test_invalid_stored_settings_never_reach_provider(self) -> None:
+
+    def _export(self, action_id, filename="prompt.txt"):
+        output = self.run_dir / action_id / filename
+        args = self.parser.parse_args([
+            "export-prompt", "--run-dir", str(self.run_dir),
+            "--action-id", action_id, "--output", str(output),
+        ])
+        result = args.handler(args)
+        return output.read_text(), result
+
+    def test_invalid_stored_motion_prevents_prompt_export(self):
         action = self._add("attack")
         path = self.run_dir / "actions" / "attack" / "action.json"
-        for invalid in (
-            None, [], {"style": "typo"}, {"root_motion": "frozen"},
-            {"end_state": "loop"}, {"end_state": "unknown"}, {"amplitude": 2},
-        ):
+        for invalid in (None, [], {"style": "typo"}, {"root_motion": "frozen"},
+                        {"end_state": "loop"}, {"end_state": "unknown"}, {"amplitude": 2}):
             with self.subTest(motion=invalid):
                 atomic_write_json(path, {**action, "motion": invalid})
-                with mock.patch("video2sprite.submit_ark_video") as submit:
-                    with self.assertRaises(Video2SpriteError):
-                        video2sprite.command_submit(self._submit_args("attack", "bad"))
-                    submit.assert_not_called()
-                self.assertFalse((path.parent / "candidates" / "bad").exists())
+                with self.assertRaises(Video2SpriteError):
+                    self._export("attack")
+                self.assertFalse((self.run_dir / "attack" / "prompt.txt").exists())
 
-    def test_provider_receives_direction_and_window_with_auditable_fingerprint(self) -> None:
+    def test_export_preserves_window_motion_and_bounded_fingerprint(self):
         action = self._add("heavy")
-        with mock.patch(
-            "video2sprite.submit_ark_video", return_value=self._provider_result()
-        ) as submit:
-            video2sprite.command_submit(self._submit_args("heavy", "pilot"))
-        kwargs = submit.call_args.kwargs
-        sent_prompt = kwargs["prompt"]
-        # Regress the contradictory all-frame foot lock and omitted runtime window.
-        self.assertNotIn("Keep the foot-root at one fixed image coordinate", sent_prompt)
-        self.assertIn("bounded pose displacement", sent_prompt)
-        self.assertIn("0.25s to 1s", sent_prompt)
-        self.assertEqual(kwargs["duration"], 4)
-        candidate_path = self.run_dir / "actions" / "heavy" / "candidates" / "pilot" / "candidate.json"
-        candidate = load_json(candidate_path)
-        self.assertEqual(candidate["request"]["motion"], action["motion"])
-        self.assertEqual(candidate["request"]["prompt_sha256"], fingerprint(sent_prompt))
-        serialized = candidate_path.read_text(encoding="utf-8")
-        self.assertNotIn(sent_prompt, serialized)
-        self.assertLess(len(serialized), 4096)
+        sent, result = self._export("heavy")
+        self.assertNotIn("Keep the foot-root at one fixed image coordinate", sent)
+        self.assertIn("lifted feet, weight shifts and full body articulation", sent)
+        self.assertIn("at the starting spot", sent)
+        self.assertIn("0.25s to 1s", sent)
+        self.assertEqual(result["duration_seconds"], 4)
+        self.assertEqual(result["motion"], action["motion"])
+        self.assertEqual(result["prompt_sha256"], fingerprint(sent))
+        self.assertNotIn(sent, json.dumps(result))
+        self.assertLess(len(json.dumps(result)), 4096)
+        with self.assertRaisesRegex(Video2SpriteError, "already exists"):
+            self._export("heavy")
 
-    def test_motion_changes_generation_input_and_duplicate_guard_still_works(self) -> None:
+    def test_framing_direction_reaches_both_reference_modes_without_rewriting_action(self):
+        self._add("wide-attack", "--root-motion", "travel", prompt="Lunge right with a wide sword swing")
+        action_path = self.run_dir / "actions" / "wide-attack" / "action.json"
+        original = action_path.read_bytes()
+        exported = {}
+        for role in ("first_frame", "reference_image"):
+            with self.subTest(role=role):
+                output = self.run_dir / f"{role}.txt"
+                args = self.parser.parse_args([
+                    "export-prompt", "--run-dir", str(self.run_dir),
+                    "--action-id", "wide-attack", "--reference-role", role,
+                    "--output", str(output),
+                ])
+                result = args.handler(args)
+                prompt = output.read_text()
+                exported[role] = prompt
+                self.assertIn("Maximize subject size with a small safety margin", prompt)
+                self.assertIn("constant character scale throughout", prompt)
+                self.assertIn("complete body, weapon path and intended travel", prompt)
+                self.assertIn("No tiny distant subject", prompt)
+                self.assertIn("clipped extremities or reduced action reach", prompt)
+                self.assertIn("no zoom, pan or cuts", prompt)
+                self.assertIn("at the destination", prompt)
+                self.assertEqual(result["prompt_sha256"], fingerprint(prompt))
+                self.assertEqual(action_path.read_bytes(), original)
+        self.assertIn("exact opening frame", exported["first_frame"])
+        self.assertNotIn("exact opening frame", exported["reference_image"])
+        self.assertIn("do not inherit its empty margins", exported["reference_image"])
+
+    def test_motion_changes_exported_prompt_and_fingerprint(self):
         action = self._add("attack")
-        path = self.run_dir / "actions" / "attack" / "action.json"
-        with mock.patch(
-            "video2sprite.submit_ark_video", return_value=self._provider_result()
-        ) as submit:
-            video2sprite.command_submit(self._submit_args("attack", "pixel"))
-            updated = load_json(path)
-            updated["motion"]["style"] = "restrained"
-            atomic_write_json(path, updated)
-            video2sprite.command_submit(self._submit_args("attack", "quiet"))
-            self.assertEqual(submit.call_count, 2)
-            self.assertNotEqual(
-                submit.call_args_list[0].kwargs["prompt"],
-                submit.call_args_list[1].kwargs["prompt"],
-            )
-            with self.assertRaisesRegex(Video2SpriteError, "same generation fingerprint"):
-                video2sprite.command_submit(self._submit_args("attack", "duplicate"))
-            self.assertEqual(submit.call_count, 2)
-        candidates = path.parent / "candidates"
-        first = load_json(candidates / "pixel" / "candidate.json")
-        second = load_json(candidates / "quiet" / "candidate.json")
-        self.assertNotEqual(first["input_fingerprint"], second["input_fingerprint"])
-        self.assertEqual(first["request"]["motion"], action["motion"])
-        self.assertEqual(load_json(path)["prompt_sha256"], action["prompt_sha256"])
+        first, metadata = self._export("attack", "first.txt")
+        action["motion"]["style"] = "restrained"
+        atomic_write_json(self.run_dir / "actions" / "attack" / "action.json", action)
+        second, updated = self._export("attack", "second.txt")
+        self.assertNotEqual(first, second)
+        self.assertNotEqual(metadata["prompt_sha256"], updated["prompt_sha256"])
 
-    def test_no_bgm_or_vfx_reaches_provider_without_disabling_required_action_audio(self) -> None:
-        self._add("clean-action")
-        path = self.run_dir / "actions" / "clean-action" / "action.json"
-        with mock.patch.dict(
-            "os.environ", {"VIDEO2SPRITE_MAX_CANDIDATES_PER_ACTION": "6"}
-        ), mock.patch(
-            "video2sprite.submit_ark_video", return_value=self._provider_result()
-        ) as submit:
-            for style in video2sprite.MOTION_STYLES:
-                for audio_required in (False, True):
-                    with self.subTest(style=style, audio_required=audio_required):
-                        action = load_json(path)
-                        action["motion"]["style"] = style
-                        action["audio_required"] = audio_required
-                        atomic_write_json(path, action)
-                        candidate_id = f"{style}-{'audio' if audio_required else 'silent'}"
-                        video2sprite.command_submit(self._submit_args("clean-action", candidate_id))
-                        sent = submit.call_args.kwargs
-                        self.assertIn("no background music (BGM)", sent["prompt"])
-                        self.assertIn("No added visual effects (VFX)", sent["prompt"])
-                        self.assertIn("no slash arcs, weapon trails", sent["prompt"])
-                        self.assertEqual(sent["generate_audio"], audio_required)
-                        if audio_required:
-                            self.assertIn("Generate synchronized dry action sound effects only", sent["prompt"])
-                            self.assertNotIn("Keep the clip silent", sent["prompt"])
-                        else:
-                            self.assertIn("Keep the clip silent", sent["prompt"])
-                        candidate = load_json(path.parent / "candidates" / candidate_id / "candidate.json")
-                        self.assertEqual(candidate["request"]["prompt_sha256"], fingerprint(sent["prompt"]))
-            self.assertEqual(submit.call_count, 6)
+    def test_clean_visuals_and_action_sound_survive_local_export(self):
+        for style in video2sprite.MOTION_STYLES:
+            for audio in (False, True):
+                with self.subTest(style=style, audio=audio):
+                    name = f"{style}-{audio}"
+                    flags = ("--audio-required",) if audio else ()
+                    self._add(name, "--motion-style", style, *flags)
+                    sent, result = self._export(name)
+                    self.assertIn("no background music (BGM)", sent)
+                    self.assertIn("No added visual effects (VFX)", sent)
+                    self.assertIn("no slash trails, particles, glow or motion blur", sent)
+                    self.assertEqual(result["audio_required"], audio)
+                    self.assertIn("Synchronized dry action SFX only" if audio
+                                  else "Silent clip", sent)
 
-    def test_terminal_and_travel_endings_do_not_force_original_root_reset(self) -> None:
-        terminal = self._add("death", "--end-state", "hold", prompt="Fall and remain fallen")
-        travel = self._add("dash", "--root-motion", "travel")
-        loop = self._add("run", "--loop")
-        terminal_prompt = video2sprite._video_prompt(terminal)
-        travel_prompt = video2sprite._video_prompt(travel)
-        loop_prompt = video2sprite._video_prompt(loop)
-        self.assertNotIn("matching ready pose at the original root", terminal_prompt)
-        self.assertNotIn("matching ready pose at the original root", travel_prompt)
-        self.assertIn("terminal or combo bridge pose", terminal_prompt)
-        self.assertIn("matching ready pose at the destination root", travel_prompt)
-        self.assertNotIn("Use a brief readable end hold", loop_prompt)
+    def test_spatial_and_ending_choices_export_as_visible_motion(self):
+        cases = (
+            ("death", ("--end-state", "hold"), "Fall and remain fallen",
+             "specified terminal or next-action pose", "at the starting spot"),
+            ("dash", ("--root-motion", "travel"), "Dash screen-right and stop",
+             "at the destination", "at the starting spot"),
+            ("run", ("--loop",), "Run facing screen-right with full alternating strides",
+             "full alternating strides", "Use a brief readable end hold"),
+            ("planted", ("--root-motion", "planted", "--loop"),
+             "Keep the left foot supporting the body while gently breathing",
+             "named support contact", "recover to the ready pose"),
+        )
+        for action_id, flags, brief, required, forbidden in cases:
+            with self.subTest(action=action_id):
+                self._add(action_id, *flags, prompt=brief)
+                sent, result = self._export(action_id)
+                self.assertTrue(sent.startswith(brief))
+                self.assertIn(required, sent)
+                self.assertNotIn(forbidden, sent)
+                for note in ("root", "pivot", "registration", "engine", "stage anchor"):
+                    self.assertNotIn(note, sent.lower())
+                self.assertEqual(result["prompt_sha256"], fingerprint(sent))
+
+    def test_shared_suffix_has_no_unrelated_action_catalog_and_keeps_selected_ending(self):
+        cases = (
+            ("idle", ("--loop", "--motion-style", "restrained"), "Breathe quietly", "Loop seamlessly", "recover to the ready pose"),
+            ("death", ("--end-state", "hold"), "Collapse forward", "terminal or next-action pose", "Loop seamlessly"),
+            ("attack", (), "Slash forward", "recover to the ready pose", "Loop seamlessly"),
+        )
+        for action_id, flags, brief, required, forbidden in cases:
+            with self.subTest(action=action_id):
+                self._add(action_id, *flags, prompt=brief)
+                sent, _ = self._export(action_id)
+                self.assertTrue(sent.startswith(brief + "\n\n"))
+                suffix = sent.split("\n\n", 1)[1]
+                self.assertIn(required, suffix)
+                self.assertNotIn(forbidden, suffix)
+                for unrelated in ("For attacks", "For idle", "For locomotion", "for death"):
+                    self.assertNotIn(unrelated, suffix)
+                # Bounds the automatic English suffix, not user-authored brief length.
+                self.assertLess(len(suffix.split()), 300)
+                self.assertEqual(suffix.count("No added visual effects"), 1)
+                self.assertEqual(suffix.count("no background music"), 1)
 
     def test_legacy_hash_is_unchanged_and_each_explicit_motion_field_affects_review(self) -> None:
         legacy = {"prompt_sha256": "fixture", "frame_count": 24, "loop": False}

@@ -1,184 +1,88 @@
-# Result-owned sprite production
+# Production contract
 
-Use this reference for production actions. The Skill owns the complete path from
-one approved character still to a runnable game asset; another sprite Skill is
-never a runtime or instruction dependency.
+## Plan before generation
 
-## 1. Establish the target contract
+Record the game's facing, logical frame size, standing character height, pivot,
+frame rate, action duration, required equipment, events and ending. Inspect
+existing assets as benchmarks; do not change the controller, reach or hitboxes
+to accommodate generated pixels. Apply the reuse/cost choices in `efficiency.md`.
 
-Before a paid video call, inspect the current game asset that the new action must
-match and record:
+Use one approved master on a matte distinct from the costume. Required props
+must contact the correct hands. Frame at the largest constant scale that safely
+contains planned poses, full weapon arcs and intended travel. Keep that actor's
+scale consistent across actions. Review grip, identity and actual source detail
+before generation. If an exact first-frame reference is tiny, reframe it first.
 
-- view and facing direction;
-- logical frame size, foot-root pivot, character height, and safe margins;
-- runtime FPS and any per-frame holds;
-- anticipation, contact, follow-through, recovery, and event frame;
-- intended pose contrast at final gameplay pixel size, move weight, root
-  behavior, and terminal state (recover, hold, or loop);
-- clean character/prop output without added visual effects or BGM; any game
-  VFX remain a separate engine layer;
-- target-engine import mode, filtering, atlas-size limit, and animation name.
+The action brief describes visible movement only. Select the matching motion and
+ending flags using `prompting.md`; don't copy engine movement or pivot rules into
+provider text. One asset normally represents one player-input action, with its
+complete anticipation/movement/follow-through and appropriate ending.
 
-Treat an existing action as a motion benchmark, not a template that overrides the
-new brief. Preserve its gameplay semantics while improving the source frame rate
-and visual quality when requested.
+## Preserve source movement and timing
 
-## 2. Lock one canonical opening frame
+Keep the original video unchanged. Preserve the action window at the intended
+runtime rate, normally native 24fps for this workflow. Do not collapse a fast
+strike to a few uniformly sampled poses. Remove redundant holds only when they
+are outside useful motion; retain anticipation, contact and terminal/bridge poses.
 
-Use one approved, fully visible game pose in the target facing direction with
-every identity-critical feature and required held prop already present. Author
-it on the same flat matte and aspect ratio requested from the video provider.
-Establish standing character pixel height and a known opening root coordinate,
-then plan the largest pose and complete weapon arc around it. Avoid excessive
-empty margins that make the character tiny after downscaling.
+If the game needs a lower-rate pixel animation, derive it with explicit timing
+from the full-rate source. Do not delete the only full-rate version. Frame drops,
+interpolation and faster playback do not create missing pose amplitude. Keep
+synchronized SFX and event times aligned; put gameplay hit-stop in the engine
+unless asset-level timing is specifically intended.
 
-Do not use an unrelated character, generic robot, placeholder costume, or a
-weaponless master for a sword action.
+## Reuse continuous sources carefully
 
-Treat grip continuity and equipment scope as hard gates. A required held prop
-must visibly meet the correct hand or joined hands at its handle; reject any gap,
-floating weapon, detached grip, or pose where the hand/handle relationship is
-ambiguous. Include only equipment required by the brief. Remove unrelated guns,
-holsters, scabbards, sheaths, pouches, backpacks, and secondary props before the
-master is approved.
+A naturally linked combo may share one continuous video and still deliver one
+action per input. Decide whether this saves expected billed work before generation;
+longer, more complicated clips can be harder to get right. Never mix unrelated
+moves solely to claim more actions from one request.
 
-## 3. Direct one game action, not a scene
+For a linked combo:
 
-Write the provider prompt in temporal order:
+- Specify exact hit count and a clear bridge after each middle impact. Preserve
+  momentum and facing; only the final stage recovers to combat idle.
+- Split so the final frame of stage N is the exact opening frame of N+1. Preserve
+  source hash, FPS, pivot, body/weapon position and audio alignment.
+- Each input has its own event and chain/cancel window. If the player stops early,
+  use a separate recovery branch or engine blend; do not insert an idle reset
+  into the linked core sequence.
+- For separately generated middle stages, use `hold` with a specific bridge pose.
+  Derivatives retain source receipts and need approval of their actual timing.
 
-1. a very short readable starting hold;
-2. anticipation with a visibly distinct silhouette and weight transfer;
-3. acceleration driven by hips, torso, shoulders, hands, and prop;
-4. one unambiguous contact direction;
-5. follow-through with secondary hair and cloth lag;
-6. the specified ending: recovery for a standalone recoverable move, a terminal
-   pose for death/form change, or a bridge for a middle combo stage;
-7. optional still padding outside the effective window (none at a loop seam).
+The CLI handles action windows and packaging, not automatic semantic combo
+splitting. Verify boundaries and event mapping; don't claim derivation succeeded
+from a storyboard or prompt alone.
 
-Default pixel ACT combat to `--motion-style pixel-act`, following the action
-table and root/end-state settings in `references/prompting.md`. Drive forceful
-actions with knees, pelvis, torso, and shoulders as well as the weapon. Light
-attacks remain quick; heavy attacks get deeper weight transfer and a more
-committed follow-through. Idle remains controlled. Fixed camera and apparent
-scale constrain registration, not body articulation or silhouette width.
+## Matte and spatial transform
 
-Specify pose amplitude and temporal contrast together. The complete action and
-its ending must fit the effective runtime window; extra provider duration is
-padding, not a reason to make the strike slow. Preserve all source frames and
-put gameplay hit-stop in the engine unless asset-level timing is deliberate.
-Never enlarge collision shapes or change the controller merely to match VFX.
+Default to a dark matte absent from the character, with `chroma-mode=border`.
+It removes near-matte pixels connected to the outer background and cleans partial
+edges, preserving enclosed clothing even when its color matches the matte.
+Enclosed genuine background pockets can remain; check them in human review.
+Do not blindly erase all enclosed matching colors to hide a background pocket.
 
-State the side-view direction, exact prop count, hand relationship, root behavior,
-and forbidden alternatives. For a sword slash, allow one blade with a readable
-physical path. Reject slash arcs, weapon trails, particles, flashes, extra blades,
-camera motion, scene cuts, or a second attack. Generate no added visual effects
-and no BGM; retain only required synchronized action sound effects.
+For authored framing use `placement=fixed`: one canvas resize/pad into the target
+frame, with the same pivot for every pose. Never resize each frame to its own
+bounds, recenter a lunge or remove a legitimate jump. Crouches and extension
+naturally change silhouette bounds. Use `fit-union` only for legacy framing; it
+still applies one shared transform. Post-crop upscaling cannot recover lost detail.
 
-Do not confuse canvas direction with depth direction. For a right-facing
-side-view character, screen-right is forward toward the enemy and screen-left is
-behind the character. An inward/outward slash may alternate between the far and
-near picture planes, but every contact must remain in the forward attack zone.
-Reject any middle-stage turn that reverses facing or sends contact into the
-rear zone. Allow a brief-specified weapon windup above/behind the
-body and torso rotation within the side view; do not suppress anticipation to
-enforce a forward contact direction.
+Changing geometry, windows or key settings is a local processing job. Try that
+before regeneration when the source itself already contains the required pixels.
 
-## 4. Preserve motion frames
+## Review and engine verification
 
-Keep the provider source video unchanged. Inside the effective action window,
-process at the intended runtime rate—normally the native 24fps for a smooth
-video-derived action. Do not reduce a fast strike to a handful of evenly spaced
-poses. It is valid to omit only deliberate static padding before or after the
-action.
+Machine QC reports decode/frame/audio failures, clipping and matte diagnostics,
+bounds/baseline variation, loop difference, geometry and hashes. It cannot prove
+anatomical scale stability, root correctness, expressiveness or visual watermark
+absence. Judge those against the move at actual game size and playback speed.
 
-If the target game later needs a lower-rate pixel animation, derive it from the
-full-rate master with explicit motion-aware timing and retain the 24fps master.
-Never delete the only high-rate sequence.
-Keep readable anticipation, contact, and follow-through poses when designing
-that timing. Uniform frame dropping, faster playback, or interpolation alone
-does not increase pose amplitude; reject weak source motion instead of claiming
-that a timing conversion fixed it.
+Use one run-level localhost review. Record explicit use/redo decisions for current
+artifacts; see `quality-gates.md`. Ordinary candidates may go directly through
+production processing and one final review. Only selected drafts need rebuilding.
 
-## 5. Split a linked combo without resetting its momentum
-
-When several player inputs form one continuous combo, use one uninterrupted
-provider source for the whole sequence, then derive one gameplay action per
-input. Four inputs and four strikes therefore become four action assets even
-when they share one paid source video.
-
-For a separately generated middle stage, use `--end-state hold` and describe
-its bridge pose. For a continuous whole-combo source, declare the exact total
-hit count in the brief; the whole source ends according to the final stage.
-
-Do not return to the opening idle pose between middle stages. Choose a readable
-bridge pose after each impact: the final frame of stage N must be the exact
-opening frame of stage N+1, with matching root, body momentum, sword position,
-hair, and cloth. The first stage may begin from combat idle; only
-the final stage should include the full recovery to that idle.
-
-If the player stops after a middle stage, leave the core attack clip unchanged.
-Use a short stage-specific recovery branch or an engine blend after the input
-window expires. Never bake that recovery into the linked core clip in a way
-that forces a visible idle reset before the next buffered input.
-
-Record one impact event and one chain/cancel window per stage. Four player
-inputs always remain four gameplay actions; a stage may contain more than one
-impact only when one input intentionally owns a multi-hit move.
-
-## 6. Use a dark connected matte
-
-Do not default to green. Choose a flat, unlit, dark hue that is absent from the
-character and props. For navy or black clothing, prefer a distinct dark aubergine
-or oxblood hue instead of a nearly identical blue-black.
-
-Use border-connected keying: remove only pixels close to the matte color that are
-connected to the canvas edge, then decontaminate partial-alpha edge pixels. This
-preserves enclosed clothing pixels even when they resemble the matte and avoids
-colored fringes.
-
-## 7. Keep one spatial transform
-
-For an authored provider canvas, use `placement=fixed`: resize the complete source
-canvas once into every logical frame. Never recenter or rescale each frame.
-Package the configured pivot in every frame record. Let root drift remain visible
-so QC and the user can judge it against the declared root policy. A pivot is a
-canvas registration coordinate, not a body-part tracker. Do not recenter a lunge,
-remove a legitimate jump, or normalize crouched and extended poses to equal
-bounding-box height. Default to `in-place` when engine code moves the actor;
-use `travel` only for deliberately baked movement and avoid applying it twice.
-
-Use `fit-union` only for legacy footage that lacks target-canvas framing. It still
-uses one union crop and one scale for the whole sequence.
-
-## 8. Verify the deliverable
-
-Machine checks must cover empty frames, matte mismatch, edge clipping, scale
-pumping, root drift, first/end pose difference, audio presence and headroom,
-atlas geometry, hashes, and event timing.
-
-Evaluate bounds/baseline diagnostics against the move: crouches, recoil,
-extension, and collapse legitimately change them. These metrics cannot prove
-expressiveness. At actual gameplay size and speed, the user must be able to
-distinguish the action's key silhouettes and perceive the intended weight even
-through body and prop motion alone. Enlarged frame inspection alone is insufficient.
-
-The localhost workbench shows all extracted frames on the left, the action video
-at the upper right, and an enlarged selected frame at the lower right. Click a
-thumbnail or use the left and right arrow keys to step through adjacent frames.
-Keyboard selection remains focused and scrolls into view. The header shows the
-current Sprite number, total Sprite count, action name, and candidate name so
-captured review evidence remains attributable. It is an observation surface,
-not a rating form. The user communicates “use this” or “redo” in the
-conversation; numeric scoring is not part of the normal path.
-
-Package only a chosen production-profile candidate. Import it with nearest
-filtering when appropriate, play it at the manifest FPS in the target engine,
-verify the pivot and contact event, and keep gameplay collision geometry out of
-pixel-derived inference.
-
-## 9. Spend deliberately
-
-Run prompt, geometry, matte, extraction, atlas, and engine-package checks offline
-first. Submit one paid pilot for the hardest representative action. Inspect and
-process that result before paying for the remaining action set. Never submit an
-automatic retry after an ambiguous provider response or an aesthetic failure.
+Package current approved production artifacts. Test target-engine playback,
+filtering, pivot, contact events and transitions. Keep VFX and collision logic in
+separate engine layers. Report untested engine behavior or pending approvals
+without presenting them as complete.

@@ -12,21 +12,24 @@ This directory is the source of truth for the `sloth-codex-video2sprite-skill` C
 
 ## Purpose and boundaries
 
-Create high-quality 2D game sprite animations with synchronized sound from a canonical still and one generated or supplied action video. Use GPT Image 2 for optional master generation, selectable video providers for action clips, and deterministic local processing for frames, transparency, audio, QC, review, and packaging.
+Create high-quality 2D game sprite animations with synchronized sound from a canonical still and one generated or supplied action video. Use GPT Image 2 for optional master generation, external generation through LibTV or supplied local action clips, and deterministic local processing for frames, transparency, audio, QC, review, and packaging.
 
 Do not depend on or modify `my-codex-sprite-skill`. Do not make a conversational image tool part of the production path. Do not infer gameplay hitboxes, projectile behavior, or approval from pixels alone.
 
-## Pixel ACT motion
+## Cost and motion policy
 
-Use action-appropriate pose contrast and timing at final gameplay pixel size.
-Generate clean character/prop animation with no added visual effects and no
-background music (BGM). Required synchronized action sound effects remain enabled.
-Keep the camera, anatomical scale, and canvas pivot stable without freezing the
-body or normalizing every pose's bounds. Preserve explicit root and terminal
-state choices: terminal/bridge actions must not be forced back to idle. Motion
-settings belong in action/request provenance and review fingerprints. Keep
-unchanged legacy processing caches valid. Offline prompt tests verify routing
-and contracts, not a provider's visual improvement; judge real output on a pilot.
+Optimize total cost per accepted gameplay action. Reuse approved sources, start
+videos at 768 with a large complete subject, use short sufficient durations and
+concise action-specific briefs. Require a reason and explicit approval before
+2K. Validate a representative pilot before expansion; stop repeating a failure
+without diagnosis. Ordinary candidates can be processed as production directly.
+
+Preserve the requested pose contrast, timing, scale, root and ending. Translate
+internal engine/pivot settings into visible movement for provider prompts. The
+exporter adds only the selected motion/ending and shared constraints; do not add
+unrelated action catalogues. Clean visuals, no BGM and required dry SFX remain.
+Keep legacy processing caches valid; offline prompt tests do not prove visual
+improvement. Production specifics belong in the references, not duplicated here.
 
 ## Media firewall
 
@@ -66,12 +69,12 @@ Run paid or live-provider tests only after credentials are configured and the us
 
 ## Provider and model rules
 
-- Resolve selection as CLI override, job/action configuration, environment, then bundled preset.
+- Image settings resolve as CLI override, environment, then bundled preset. Video model selection belongs to the external generator.
 - Keep model IDs configurable; presets are not proof that a model is enabled on the user's account.
 - Preserve provider task IDs and input hashes so interrupted work resumes without accidental duplicate billing.
-- `advance` may poll, download, and process existing candidates concurrently, but must never submit provider work.
+- `advance` processes local candidates only. Do not restore direct video-provider submission or polling; preserve historical media and metadata.
 - A valid processing-cache hit must not rewrite artifacts or invalidate approval.
-- Keep remote candidates within the configured per-action budget unless the caller explicitly overrides it.
+- Apply pilot review and retry budgets in the agent workflow before external generation; the local CLI has no billed-task guard.
 - Draft processing is for selection only; packaging requires production processing followed by a current approval.
 - Compare models using the same reference, prompt, duration, resolution, and seed where possible.
 - Require native audio for the default production goal unless the user explicitly accepts a silent model or adds a separate audio provider.
