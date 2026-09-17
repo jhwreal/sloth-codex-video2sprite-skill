@@ -66,8 +66,10 @@ function changed() {
   saveDraft(); draw(); if (resume && timeline.length) play();
 }
 function setKept(i, kept) {
+  const wasPlaying = playing;
   const excluded = new Set(draft.excluded); kept ? excluded.delete(i) : excluded.add(i);
   draft.excluded = [...excluded].sort((a,b)=>a-b); changed();
+  if (!wasPlaying) seek(i);
 }
 function draw() {
   ctx.clearRect(0,0,576,576); ctx.imageSmoothingEnabled = false;
@@ -87,7 +89,7 @@ function draw() {
     }
   }
   const position = timeline.findIndex(f=>f.index===index);
-  $('#frame').textContent = !timeline.length ? '没有可播放帧，请勾选至少一帧' :
+  $('#frame').textContent = !timeline.length ? `原第 ${index+1} 帧 · 仅查看；没有可播放帧，请勾选至少一帧` :
     `原第 ${index+1} 帧 · ${position < 0 ? '已排除 / 仅查看' : `播放 ${position+1} / ${timeline.length}`} · ${elapsed.toFixed(2)} 秒`;
   document.querySelectorAll('[data-frame]').forEach(b=>b.classList.toggle('current',Number(b.dataset.frame)===index));
   document.querySelectorAll('[data-timeline-frame]').forEach(b=>b.classList.toggle('current',Number(b.dataset.timelineFrame)===index));
@@ -196,7 +198,17 @@ $('#export').onclick=()=>{
   const a=document.createElement('a');a.href=url;a.download=`${action}-sprite-edit.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;render().catch(showError);});
-document.addEventListener('keydown',e=>{if(['INPUT','SELECT','BUTTON','TEXTAREA'].includes(e.target.tagName))return;if(['ArrowLeft','ArrowRight'].includes(e.key)){e.preventDefault();step(e.key==='ArrowLeft'?-1:1);}});
+document.addEventListener('keydown',e=>{
+  if (!['ArrowLeft','ArrowRight'].includes(e.key) || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return;
+  const target=e.target;
+  if (target.closest('input,select,textarea') || target.isContentEditable || !frames.length) return;
+  e.preventDefault();
+  // Keyboard inspection follows every card, including excluded/out-of-range frames.
+  seek((index+(e.key==='ArrowLeft'?-1:1)+frames.length)%frames.length);
+  const card=$('#filmstrip').querySelector(`[data-frame="${index}"]`);
+  card?.querySelector('.frame-view')?.focus({preventScroll:true});
+  card?.scrollIntoView({block:'nearest',inline:'nearest'});
+});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});
 sound.onerror=()=>{audioReady=false;message('当前音轨无法加载，帧图仍可正常播放。');};
 function tick(now){

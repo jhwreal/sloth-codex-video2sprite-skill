@@ -7,6 +7,10 @@ otherwise install `assets/sprite-edit-workbench/instant/`. Keep the selected
 backend, originals, provenance and acceptance rules. A review-only request or
 standalone master drawing does not require creating an action editor.
 
+One workbench represents one Sprite/character. Its left navigation lists that
+Sprite's actions (for example Boss Action 1 / Action 2, or idle / attack), not
+character categories such as Boss / Enemy. Each action has its own versions.
+
 ## Create or update an instance
 
 The default is the reusable frame-and-audio editor extracted from the tested
@@ -72,6 +76,12 @@ the presentation manifest; do not copy private URLs or provider payloads into it
   Exclusion changes only the draft; playback immediately skips excluded frames
   in original order. Clicking an excluded image still inspects it. Empty selection
   disables playback; all-keep restores the checkmarks (range still applies).
+- Left/Right arrows inspect adjacent cards in the complete bottom filmstrip,
+  including excluded and out-of-range frames; inspection pauses playback and
+  scrolls/focuses the selected card into view without changing inclusion. This
+  also works after clicking a frame, its keep/remove button or playback controls.
+  Text/number inputs, selects and editable text retain their normal arrow keys.
+  Toolbar previous/next still step through retained playback frames.
 - UI frame numbers and exported selections are one-based and inclusive. Internal
   indices are zero-based. Remaining frame holds are preserved by default; equal
   timing is an explicit option. Do not normalize frames to individual bounds.

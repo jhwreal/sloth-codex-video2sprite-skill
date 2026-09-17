@@ -41,7 +41,8 @@ switch a built-in image request to it.
 For existing sprite edits, always load the affected actions into the
 [instant editing workbench](references/sprite-edit-workbench.md) and give the user
 its localhost URL. This applies equally to Bosses, enemies and other characters,
-for both video and image-sheet paths. Reuse a project instance or install the
+for both video and image-sheet paths. Each workbench contains one Sprite's
+actions and each action's versions. Reuse a project instance or install the
 bundled `assets/sprite-edit-workbench/instant/` template. Append new versions,
 preserve explicit per-action choices, and preview frame selection with canvas
 frames plus independent audio; do not regenerate preview video for draft edits.
