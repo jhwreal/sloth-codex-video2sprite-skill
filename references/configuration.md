@@ -1,11 +1,15 @@
 # Configuration
 
-## Image settings and credentials
+## Explicit headless image API settings and credentials
+
+These settings apply only to the existing `generate-master` CLI worker when
+that API path is explicitly selected. Normal imagegen work follows
+[image-workflow.md](image-workflow.md) and needs no CLI API key.
 
 Image configuration resolves as CLI argument, environment variable, then
 `assets/model-presets.json`. Video generation is external; configure its model
 in LibTV or the selected tool. Follow the 768 default and prior 2K approval rule
-in `../SKILL.md`.
+in [video-workflow.md](video-workflow.md).
 
 ```text
 OPENAI_API_KEY=

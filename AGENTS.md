@@ -12,9 +12,9 @@ This directory is the source of truth for the `sloth-codex-video2sprite-skill` C
 
 ## Purpose and boundaries
 
-Create high-quality 2D game sprite animations with synchronized sound from a canonical still and one generated or supplied action video. Use GPT Image 2 for optional master generation, external generation through LibTV or supplied local action clips, and deterministic local processing for frames, transparency, audio, QC, review, and packaging.
+Provide the unified entry point for 2D sprite production. Default new continuous actions to the existing video pipeline; route standalone artwork to imagegen and image-sheet generation/processing to the separately maintained `my-codex-sprite-skill` backend only when needed. Preserve each backend's formats, source provenance, timing, required sound and acceptance rules.
 
-Do not depend on or modify `my-codex-sprite-skill`. Do not make a conversational image tool part of the production path. Do not infer gameplay hitboxes, projectile behavior, or approval from pixels alone.
+The video backend remains independently usable. Image-sheet routing may read the installed `my-codex-sprite-skill` on demand; do not duplicate its scripts or point either backend at the other's run format. The image path may use built-in imagegen and necessary image inspection. Do not infer gameplay hitboxes, projectile behavior, or human approval from pixels alone.
 
 ## Cost and motion policy
 
@@ -31,17 +31,18 @@ unrelated action catalogues. Clean visuals, no BGM and required dry SFX remain.
 Keep legacy processing caches valid; offline prompt tests do not prove visual
 improvement. Production specifics belong in the references, not duplicated here.
 
-## Media firewall
+## Media firewall and scoped image inputs
 
 - Never print or return Base64, data URLs, media bytes, signed URL query strings, full provider payloads, credentials, or unbounded logs.
 - Decode provider media inside the worker and write it directly to disk.
 - Limit CLI stdout to compact JSON summaries. Redact all debug and error output through the same safe serializer.
 - Keep generated runs, raw media, caches, review decisions, and private references outside the Skill source.
-- Review media through the localhost reviewer; agents use the bounded `status` or
+- Native image-tool inputs/outputs and necessary image inspection are allowed only for the selected image path; never dump raw media payloads into text or logs.
+- Video processing/review keeps media in the localhost reviewer; agents use the bounded `status` or
   `compare` command and read only small `qc.json`, `manifest.json`, and
   `approval.json` files.
 
-Any change that can expose media payloads must add a regression test proving stdout and persisted logs remain bounded and contain no Base64 or data URL.
+Changes to worker serialization or logging require regression coverage proving stdout and persisted logs stay bounded and contain no Base64 or data URL. Routing image work through native image tools does not relax that worker contract.
 
 ## Dependencies
 
@@ -77,7 +78,7 @@ Run paid or live-provider tests only after credentials are configured and the us
 - Apply pilot review and retry budgets in the agent workflow before external generation; the local CLI has no billed-task guard.
 - Draft processing is for selection only; packaging requires production processing followed by a current approval.
 - Compare models using the same reference, prompt, duration, resolution, and seed where possible.
-- Require native audio for the default production goal unless the user explicitly accepts a silent model or adds a separate audio provider.
+- Require native audio for the default video-action production goal unless the user explicitly accepts a silent model or adds a separate audio provider. Do not impose audio on standalone image tasks or claim an image sheet includes sound.
 - Route every LibTV artifact through `libtv-download`; it must always pass
   `--without-ai-watermark --vip`, issue a bounded receipt, and require an
   explicit upstream-reference audit. Never classify LibTV output as ordinary

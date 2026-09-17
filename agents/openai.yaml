@@ -1,4 +1,4 @@
 interface:
-  display_name: "Sloth Video to Sprite"
-  short_description: "Own the full path from action video to game-ready sprites"
-  default_prompt: "Use $sloth-codex-video2sprite-skill to deliver readable gameplay actions at low total cost: reuse approved sources, start at 768 with a large subject, keep prompts concise, validate one pilot, and preserve the media boundary and required user approvals."
+  display_name: "Sloth Sprite Production"
+  short_description: "Create sprites through video or on-demand image workflows"
+  default_prompt: "Use $sloth-codex-video2sprite-skill to create or repair my game sprites, reusing existing assets and choosing the video or image workflow needed for the requested result."

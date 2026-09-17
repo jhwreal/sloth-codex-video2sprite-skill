@@ -2,7 +2,9 @@
 
 ## GPT Image 2
 
-Use the OpenAI Image API for one-shot canonical master generation.
+For an explicitly selected headless API workflow, retain the existing one-shot
+canonical-master worker. Normal built-in imagegen uses the scoped
+[image workflow](image-workflow.md); this API contract does not apply to it.
 
 - Default model: `gpt-image-2`.
 - Credential: `OPENAI_API_KEY`, resolved from the environment first and then

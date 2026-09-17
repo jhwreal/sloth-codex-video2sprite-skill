@@ -1,29 +1,127 @@
 # Default sprite modification workbench
 
-When modifying existing sprites, default to this three-stage workbench. Reuse an existing project instance when available; otherwise adapt the source templates in `assets/sprite-edit-workbench/`. These are adaptation templates, not a standalone generic server. Keep the standard CLI observation-only reviewer available for generation-only tasks.
+For **every existing sprite modification**, whether Boss, enemy, player, NPC,
+video-derived, image-sheet or loose frames, load the asset into the instant editor
+and return its localhost URL to the user. Reuse a project instance where possible;
+otherwise install `assets/sprite-edit-workbench/instant/`. Keep the selected
+backend, originals, provenance and acceptance rules. A review-only request or
+standalone master drawing does not require creating an action editor.
 
-## User flow
+## Create or update an instance
 
-- 工作中: action list, named versions, original video, transparent animation, complete numbered filmstrip, large selected-frame view, play/pause, previous/next frame, range, FPS and loop controls. Make edits into NEW unconfirmed versions and preserve originals.
-- 已确认: only explicit human approvals of the exact candidate and selected range/timing. Accept confirmation in the conversation or a deliberate UI click. Approval is not game binding. Show legacy approved material with an explicit source label; never imply it is an approved generated candidate.
-- 游戏绑定: show the actual runtime selection. Bind only after explicit user intent and valid approval; provide per-action rollback. Use the host game's existing adapter, not a second persistence system.
+The default is the reusable frame-and-audio editor extracted from the tested
+instant-edit workbench. It has no character IDs, generation budget or engine
+binding built in. Prepare `production-plan.json` in an output directory outside
+Skill sources, then run:
 
-## Editing behavior
+```bash
+python "$SKILL_DIR/scripts/create_sprite_workbench.py" --output-dir /path/to/workbench
+python -m http.server 8795 --bind 127.0.0.1 --directory /path/to/project
+```
 
-Interpret ordinary user frame numbers as one-based and inclusive. If a code template exposes zero-based indices, label or convert them clearly. Retain the original order and pixels of unchanged frames, canvas, root and consistent scale. Do not normalize each frame to its own bounds.
+Serve a root containing the workbench and its local media, then give the user the
+corresponding `/path/to/workbench/index.html` URL. The helper copies only three
+editor files and refuses to overwrite an existing instance. For an existing
+instance, merge the template behavior into its project adapter; preserve its plan,
+media, decisions, custom controls and runtime binding.
 
-For compact timing, identify redundant holds and near-duplicates using bounded motion measurements. Preserve anticipation, main movement and recovery or terminal pose appropriate to the action. Match requested duration with both selection and timing, not arbitrary sparse frame removal. There is no default 0.5-second action or 80-second generation budget: follow each user's request.
+Minimal project plan (paths are examples, not bundled media):
 
-Regenerate atlas, frame hashes, manifest, preview, synchronized audio and review metadata for a derived candidate. Verify decoded preview frame count and duration; short audio must not truncate the video. Keep source video, receipts and derivation mapping. New media/range/timing invalidates approval. Image redraws or paid regeneration require user intent; editing existing frames does not imply permission to generate.
+```json
+{
+  "title": "Sprite 即时编辑工作台 · Character",
+  "workbench": {"canvasWidth": 320, "canvasHeight": 240},
+  "actions": [{
+    "action": "idle", "name": "待机", "fps": 12, "loop": true,
+    "candidates": [
+      {"id": "idle-v1", "label": "待机 v1", "manifest": "idle/v1/manifest.json"},
+      {"id": "idle-v2", "label": "待机 v2", "manifest": "idle/v2/manifest.json"}
+    ]
+  }]
+}
+```
 
-## Template adaptation
+Each candidate has a distinct immutable manifest path. Append every new version,
+including H3 retries, image edits and locally trimmed derivatives, to the end of
+`candidates`; never replace older entries. Arrays define chronological order.
+The editor polls the plan every ten seconds, defaults to the latest version, and
+preserves a user's explicit choice separately for each action. Optional `frames`
+is an ordered array of reference image paths, not a claim of approval. `prompt`
+and `opening` are optional local resource links.
 
-The supplied `.template` files preserve the approved Boss workbench layout and interaction code. Before running, adapt ROOT/RUN/HERE, skill scripts path, action IDs/names, legacy atlas path, title, API namespace/port, character identity, scale and game adapter to the target project. The sample character constants are examples, never defaults for other sprites. Do not copy approval files, bound assets, user media or generation budgets.
+Manifest paths are relative to the plan/page; frame, atlas and audio paths are
+relative to their manifest. Use a presentation manifest for image-sheet backends
+without rewriting their native run schema. A manifest needs `fps` and ordered
+`frames`, each with `file` or an atlas `cell: {x,y,width,height}`. Optional fields:
 
-The example server's `select` note must describe the user's actual decision, without attributing unasked audiovisual claims. Its `bind` receipt handling must branch on source origin: validate LibTV receipts only for LibTV sources and preserve legitimate local/image provenance. Configure scale per asset; never inherit the sample 768/552 correction universally. Any binding logic and timing/events need target-engine verification before use.
+- `duration_ticks` (or `duration_seconds`) on each frame, `loop` on the manifest.
+- `atlas: {path,width,height,sha256}` and `canvas: {width,height}` for atlas playback.
+- `audio: {present:true,path:"sfx.ogg"}` for a separate audio file.
+- `derivation.crop: [x,y,width,height]` with `derivation.canvas_width` and
+  `canvas_height` for restoring cropped cells to the original canvas.
 
-Use the sample filmstrip and preview behavior as the visual standard. Provide new-version trim/deletion either through UI controls or agent processing, but always return the result to 工作中. Preserve localhost token/origin checks, path bounds and media hash approval checks when adapting writes. Do not open generated media in the agent context; human review remains the visual authority.
+Keep uniform geometry, root and scale. Supply actual dimensions, especially for
+cropped and non-square sprites. Preserve backend source/receipt/hash metadata in
+the presentation manifest; do not copy private URLs or provider payloads into it.
+
+## Instant editing contract
+
+- 工作中 shows actions, oldest-to-newest versions, a canvas preview, full numbered
+  filmstrip, timeline, range, FPS, speed, timing mode and loop controls.
+- Every card has ✓ at top left and × at top right. All frames start included.
+  Exclusion changes only the draft; playback immediately skips excluded frames
+  in original order. Clicking an excluded image still inspects it. Empty selection
+  disables playback; all-keep restores the checkmarks (range still applies).
+- UI frame numbers and exported selections are one-based and inclusive. Internal
+  indices are zero-based. Remaining frame holds are preserved by default; equal
+  timing is an explicit option. Do not normalize frames to individual bounds.
+- **No preview video is generated or loaded for these edits.** Canvas frames and
+  an independent audio element provide immediate playback. Do not rerun FFmpeg or
+  a video build script merely because a user changes frame selection or timing.
+  Existing generation CLI artifacts remain compatible; source videos stay intact.
+- Audio starts at the selected retained playback frame, restarts on loops and
+  stops on pause, action/version/tab change, animation end or hidden page. FPS and
+  speed affect its rate. Removing picture frames does not splice corresponding
+  audio segments; verify sound alignment with the user before final delivery.
+- Drafts and explicit choices persist in localStorage, scoped to page directory,
+  browser and origin. Different ports/browsers do not share them. Export JSON to
+  preserve a decision outside browser storage. New manifest content creates a
+  fresh draft; keep version paths immutable.
+
+## Confirmation, binding and final delivery
+
+Export downloads `sprite-edit-decision.v1`: source manifest/snapshot, atlas hash
+when available, selected frame numbers, compressed timeline, timing and audio cue.
+It is a **pending edit recipe**, not an atlas, approval or game binding. Validate
+source hashes/snapshot before applying it through the current backend's derived
+candidate adapter; preserve unchanged pixels, frame mapping, receipts and sound.
+Build a new unconfirmed version and add it back to 工作中. Materialize final atlas,
+metadata and required sound after the selection is settled; preview video remains
+optional unless a separately requested export/backend contract requires it.
+
+已确认 and 游戏绑定 are read-only views. A project adapter may populate each
+action's `confirmed` or `binding` with `{label,manifest}` only after verifying the
+actual human approval or runtime record against the current media and timing.
+Their manifests describe the exact final selection and sound. Without these
+records, display an empty state; never relabel reference frames as approved.
+Edits do not approve or bind anything. Use the backend's existing acceptance and
+game adapter for writes, require user intent for binding, invalidate acceptance
+when content/timing changes, and retain per-action rollback.
+
+The older top-level `.template` files are **legacy project-specific examples**
+for server writes and Godot binding, not the default editor or a drop-in API for
+this frontend. Only consult them when adapting an existing integration. Adapt
+ROOT/RUN/HERE, namespace, identity, scale and engine paths; remove example budgets
+and hardcoded audiovisual approval claims. Preserve localhost token/origin checks,
+path bounds, receipt origin branching and hash validation. Never apply the sample
+768/552 scale, action list or LibTV-only receipt copy to another character.
 
 ## Verification
 
-Check that the requested candidate appears in 工作中 unconfirmed; retained frames match source; preview count/duration agree with manifest; confirming does not bind; binding rejects unconfirmed or modified candidates; rollback preserves other actions. No paid test is needed to adapt this template.
+Run `node --test tests/test_editor_model.mjs` and the Python helper tests. Use
+synthetic local images/audio for a browser smoke test: exclude final five of ten
+frames, verify five-frame playback/timing, all-excluded protection, restore,
+refresh persistence, two actions' remembered versions, latest-version fallback,
+audio cue/pause and empty confirmed/binding states. Confirm no video element or
+preview-video request. Actual animation aesthetics, audio sync and any engine
+binding still require asset-specific user/engine review.

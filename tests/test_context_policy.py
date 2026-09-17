@@ -8,8 +8,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class ContextPolicyTests(unittest.TestCase):
-    def test_skill_forbids_media_rehydration_tools(self) -> None:
-        skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    def test_video_workflow_preserves_bounded_media_tools(self) -> None:
+        skill = (ROOT / "references" / "video-workflow.md").read_text(encoding="utf-8")
         for forbidden_tool in ("view_image", "read_thread", "imagegen"):
             self.assertIn(forbidden_tool, skill)
         self.assertIn("status --compact", skill)
@@ -20,7 +20,8 @@ class ContextPolicyTests(unittest.TestCase):
         quality = (ROOT / "references" / "quality-gates.md").read_text(
             encoding="utf-8"
         )
-        combined = f"{skill}\n{quality}"
+        video = (ROOT / "references" / "video-workflow.md").read_text(encoding="utf-8")
+        combined = f"{skill}\n{video}\n{quality}"
         for required in (
             "--without-ai-watermark",
             "--vip",
