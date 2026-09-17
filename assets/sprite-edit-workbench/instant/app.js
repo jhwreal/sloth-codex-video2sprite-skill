@@ -160,6 +160,7 @@ async function render() {
   draftKey=JSON.stringify([action,version?.key||'reference',fingerprint]);
   draft={excluded:[],start:1,end:frames.length,fps:manifest?.fps||entry.fps||4,speed:1,loop:manifest?.loop??entry.loop,
     timing:'original',audioStart:1,audioEnabled:true,...(tab==='work'?saved.drafts[draftKey]:{})};
+  if (![.5,1,2,3,4,5].includes(draft.speed)) draft.speed=1;
   $('#start').max=$('#end').max=frames.length;
   numeric('#start',draft.start,n=>{draft.start=Math.round(n);draft.end=Math.max(draft.start,draft.end);$('#end').value=draft.end;});
   numeric('#end',draft.end,n=>{draft.end=Math.round(n);draft.start=Math.min(draft.start,draft.end);$('#start').value=draft.start;});
