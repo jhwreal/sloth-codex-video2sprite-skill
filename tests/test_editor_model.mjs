@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {versionsFor,chooseVersion,timelineFor,frameAt} from '../assets/sprite-edit-workbench/instant/editor-model.mjs';
+import {versionsFor,chooseVersion,timelineFor,frameAt,keepRange} from '../assets/sprite-edit-workbench/instant/editor-model.mjs';
 const frames=Array.from({length:10},()=>({duration_ticks:1}));
 const draft={fps:10,speed:1,start:1,end:10,excluded:[]};
 test('10 frames minus final 5 plays only first 5, with compact timeline',()=>{
@@ -39,4 +39,14 @@ test('fresh browser respects generic chronological order and fractional frame ho
  assert.equal(chooseVersion(versions,recalled.idle),'v1.json');
  assert.equal(chooseVersion(versions,recalled.attack),'v2.json');
  assert.equal(timelineFor([{duration_ticks:.5}],{...draft,end:1})[0].duration,.05);
+});
+
+test('Shift range includes both ends, supports reverse and preserves outside selection',()=>{
+ const excluded=Array.from({length:200},(_,i)=>i);
+ const kept=keepRange(excluded,99,149);
+ assert.equal(200-kept.length,51);
+ assert.deepEqual(keepRange(excluded,149,99),kept);
+ assert.deepEqual(keepRange([0,2,3,4,6],2,4),[0,6]);
+ assert.deepEqual(keepRange([0,1,2],1,1),[0,2]);
+ assert.equal(excluded.length,200);
 });

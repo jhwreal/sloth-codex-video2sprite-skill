@@ -14,5 +14,6 @@
 <div class="controls" id="audio-controls"><label><input type="checkbox" id="audio-enabled"> 播放音效</label><label>从保留后的第 <input id="audio-start" type="number" min="1" max="1" value="1"> 帧开始</label><span class="meta" id="audio-status"></span></div>
 <p class="meta">播放时间轴 · 顺序 / 原帧号（鼠标停留查看起止时间）</p><div id="timeline" aria-label="播放时间轴"></div><p id="timeline-empty" hidden>尚未保留任何帧。点击下方 ✓ 或“全部保留”恢复播放。</p>
 <div class="controls"><button id="keep-all">全部保留</button><button id="exclude-all">全部排除</button><button id="export">导出剪辑方案</button></div>
+<p class="meta" id="shortcuts">快捷键：按住 Shift，依次点击起始帧和结束帧（图片或 ✓），保留两端及中间所有帧；每两次 Shift 点击选择一个区间。← / → 切换查看帧。</p>
 <p id="detail" class="meta"></p><div id="filmstrip" aria-label="全部动作帧"></div><p id="message" role="status"></p><div id="resources"></div><p class="meta">左右箭头切换下方全部帧（含排除帧），选中帧自动滚动到可见位置。当前是预览剪辑，不代表动作已确认或已绑定游戏。</p>
 </section></main><script type="module" src="app.js"></script></html>

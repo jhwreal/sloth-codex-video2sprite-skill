@@ -79,6 +79,12 @@ the presentation manifest; do not copy private URLs or provider payloads into it
   Exclusion changes only the draft; playback immediately skips excluded frames
   in original order. Clicking an excluded image still inspects it. Empty selection
   disables playback; all-keep restores the checkmarks (range still applies).
+- Hold Shift and click the first and last frame image (or keep button) to retain
+  the inclusive range, in either direction. The first Shift-click retains its
+  frame and anchors the range; the second completes and resets the pair. Existing
+  selections outside the range stay unchanged. An ordinary frame click, window
+  blur, action/version/tab change or all-keep/all-exclude resets the anchor. No Ctrl multi-select.
+  Read-only tabs cannot change inclusion. Show this shortcut below bulk controls.
 - Left/Right arrows inspect adjacent cards in the complete bottom filmstrip,
   including excluded and out-of-range frames; inspection pauses playback and
   scrolls/focuses the selected card into view without changing inclusion. This

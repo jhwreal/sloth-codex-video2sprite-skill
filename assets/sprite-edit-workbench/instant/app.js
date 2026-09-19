@@ -1,4 +1,4 @@
-import {versionsFor, chooseVersion, timelineFor, frameAt} from './editor-model.mjs';
+import {versionsFor, chooseVersion, timelineFor, frameAt, keepRange} from './editor-model.mjs';
 const $ = s => document.querySelector(s), ctx = $('#preview').getContext('2d');
 const storageKey = `sprite-editor:v1:${location.pathname.replace(/[^/]*$/, '')}`;
 let saved;
@@ -6,6 +6,7 @@ try { saved = JSON.parse(localStorage.getItem(storageKey)) || {}; } catch { save
 saved.choices ||= {}; saved.drafts ||= {}; saved.catalog ||= {};
 let plan, action = saved.action || null, tab = 'work', version, entry;
 let frames = [], images = [], manifest, atlas, draft, draftKey, timeline = [], index = 0;
+let shiftAnchor = null;
 let playing = false, elapsed = 0, started = 0, serial = 0, audioReady = false;
 const sound = $('#sound');
 function persist() { try { localStorage.setItem(storageKey, JSON.stringify(saved)); }
@@ -71,6 +72,17 @@ function setKept(i, kept) {
   draft.excluded = [...excluded].sort((a,b)=>a-b); changed();
   if (!wasPlaying) seek(i);
 }
+function selectFrame(i, event, keep = false) {
+  if (event.shiftKey && tab==='work' && draft) {
+    const start = shiftAnchor ?? i;
+    shiftAnchor = shiftAnchor === null ? i : null;
+    draft.excluded = keepRange(draft.excluded, start, i);
+    stop(); changed(); seek(i);
+  } else {
+    shiftAnchor = null;
+    if (keep) setKept(i, true); else seek(i);
+  }
+}
 function draw() {
   ctx.clearRect(0,0,576,576); ctx.imageSmoothingEnabled = false;
   if (frames.length) {
@@ -97,11 +109,11 @@ function draw() {
 function buildFilmstrip(base) {
   $('#filmstrip').replaceChildren(...frames.map((f,i)=>{
     const card = document.createElement('div'); card.className = 'frame-card'; card.dataset.frame = i;
-    const keep = button('✓',()=>setKept(i,true)); keep.className = 'keep'; keep.title = `保留第 ${i+1} 帧`;
+    const keep = button('✓',event=>selectFrame(i,event,true)); keep.className = 'keep'; keep.title = `保留第 ${i+1} 帧`;
     keep.setAttribute('aria-label',keep.title);
-    const remove = button('×',()=>setKept(i,false)); remove.className = 'remove'; remove.title = `排除第 ${i+1} 帧`;
+    const remove = button('×',()=>{shiftAnchor=null;setKept(i,false);}); remove.className = 'remove'; remove.title = `排除第 ${i+1} 帧`;
     remove.setAttribute('aria-label',remove.title);
-    const view = button('',()=>seek(i)); view.className='frame-view'; view.setAttribute('aria-label',`查看第 ${i+1} 帧`);
+    const view = button('',event=>selectFrame(i,event)); view.className='frame-view'; view.setAttribute('aria-label',`查看第 ${i+1} 帧`);
     if (f.cell && atlas) {
       const tile = document.createElement('span'), c=f.cell;
       const ratio=112/Math.max(c.width,c.height);
@@ -120,6 +132,7 @@ function numeric(id, value, fn) { const el=$(id);el.value=value;
   const n=Number(el.value); el.value=Math.max(Number(el.min),Math.min(Number(el.max),Number.isFinite(n)?n:value));fn(Number(el.value));changed();
 }; }
 async function render() {
+  shiftAnchor=null;
   const ticket=++serial;stop(); frames=[];images=[];atlas=null;manifest=null;audioReady=false;
   sound.removeAttribute('src'); sound.load(); $('#play').disabled=true;
   $('#filmstrip').replaceChildren(); $('#timeline').replaceChildren(); ctx.clearRect(0,0,576,576);
@@ -187,8 +200,8 @@ $('#play').onclick=()=>{if(playing){elapsed=(performance.now()-started)/1000;sto
 $('#restart').onclick=()=>{elapsed=0;index=timeline[0]?.index||0;play();};
 function step(delta){if(!timeline.length)return;const pos=timeline.findIndex(f=>f.index===index);seek(timeline[(Math.max(pos,0)+delta+timeline.length)%timeline.length].index);}
 $('#prev').onclick=()=>step(-1);$('#next').onclick=()=>step(1);
-$('#keep-all').onclick=()=>{if(!draft)return;draft.excluded=[];changed();};
-$('#exclude-all').onclick=()=>{if(!draft)return;draft.excluded=frames.map((_,i)=>i);changed();};
+$('#keep-all').onclick=()=>{if(!draft)return;shiftAnchor=null;draft.excluded=[];changed();};
+$('#exclude-all').onclick=()=>{if(!draft)return;shiftAnchor=null;draft.excluded=frames.map((_,i)=>i);changed();};
 $('#export').onclick=()=>{
   if(!draft || tab!=='work')return;
   const value={schema:'sprite-edit-decision.v1',action,version:version?.key||'reference',approval:'pending_human_review',
@@ -210,6 +223,7 @@ document.addEventListener('keydown',e=>{
   card?.querySelector('.frame-view')?.focus({preventScroll:true});
   card?.scrollIntoView({block:'nearest',inline:'nearest'});
 });
+window.addEventListener('blur',()=>{shiftAnchor=null;});
 document.addEventListener('visibilitychange',()=>{if(document.hidden)stop();});
 sound.onerror=()=>{audioReady=false;message('当前音轨无法加载，帧图仍可正常播放。');};
 function tick(now){

@@ -32,3 +32,9 @@ export function timelineFor(frames, draft) {
 export function frameAt(timeline, seconds) {
   return timeline.findIndex(item => seconds < item.start + item.duration);
 }
+
+// Add an inclusive range to the retained set, preserving every other selection.
+export function keepRange(excluded, anchor, end) {
+  const first = Math.min(anchor, end), last = Math.max(anchor, end);
+  return excluded.filter(index => index < first || index > last);
+}
