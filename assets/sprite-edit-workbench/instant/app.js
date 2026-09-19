@@ -11,6 +11,18 @@ let playing = false, elapsed = 0, started = 0, serial = 0, audioReady = false;
 const sound = $('#sound');
 function persist() { try { localStorage.setItem(storageKey, JSON.stringify(saved)); }
   catch { $('#message').textContent = '浏览器存储不可用；请导出当前剪辑方案以保留修改。'; } }
+function setLayout(layout) {
+  layout = layout === 'split' ? 'split' : 'classic';
+  document.body.dataset.layout = layout;
+  saved.layout = layout;
+  const actions = $('#actions');
+  if (layout === 'split') $('#top-actions').append(actions);
+  else document.querySelector('main').prepend(actions);
+  document.querySelectorAll('[data-layout-choice]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.layoutChoice===layout)));
+  persist();
+}
+document.querySelectorAll('[data-layout-choice]').forEach(b=>b.onclick=()=>setLayout(b.dataset.layoutChoice));
+setLayout(saved.layout);
 function button(text, fn) { const b = document.createElement('button'); b.textContent = text; b.onclick = fn; return b; }
 function message(text) { $('#message').textContent = text; }
 async function json(path) { const r = await fetch(path, {cache:'no-store'}); if (!r.ok) throw Error(`无法加载 ${path}`); return r.json(); }
