@@ -73,6 +73,8 @@ the presentation manifest; do not copy private URLs or provider payloads into it
 - 工作中 shows actions, oldest-to-newest versions, a canvas preview, full numbered
   filmstrip, timeline, range, FPS, speed (0.5x, 1x, 2x, 3x, 4x, 5x; default 1x),
   timing mode and loop controls. Older saved unsupported speeds reset to 1x.
+- The full filmstrip expands with its content and uses the document scrollbar;
+  do not add a fixed/max height or a nested vertical scroll container.
 - Every card has ✓ at top left and × at top right. All frames start included.
   Exclusion changes only the draft; playback immediately skips excluded frames
   in original order. Clicking an excluded image still inspects it. Empty selection
